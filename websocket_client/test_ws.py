@@ -3,7 +3,7 @@
 """
 test_ws.py
 
-Protocol test client for the split WebSocket gateway.
+WebSocket client-side protocol test for the split gateway.
 
 Current gateway layout
 ----------------------
@@ -605,4 +605,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
