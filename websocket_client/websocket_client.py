@@ -42,6 +42,18 @@ class WebSocketProtocolError(WebSocketClientError):
 
 
 PinInput = Union[int, str]
+PinArgument = Union[PinInput, Sequence[PinInput]]
+
+
+def _expand_pin_arguments(pins):
+    """Accept both client.on(1, 2) and client.on([1, 2])."""
+    if len(pins) != 1 or isinstance(pins[0], (str, int)):
+        return pins
+
+    try:
+        return tuple(pins[0])
+    except TypeError:
+        return pins
 
 
 def row_col_to_pin(row: int, col: int) -> int:
@@ -406,9 +418,9 @@ class WebSocketClient:
 
         return resp
 
-    async def on(self, *pins: PinInput) -> Dict[str, Any]:
-        """Turn ON one or more pins."""
-        parsed = parse_pin_tokens(pins)
+    async def on(self, *pins: PinArgument) -> Dict[str, Any]:
+        """Turn ON pins supplied as arguments or one iterable."""
+        parsed = parse_pin_tokens(_expand_pin_arguments(pins))
         resp = await self._send_pico_command({"cmd": "ON", "pins": parsed}, "ON")
 
         if not isinstance(resp.get("results"), list):
@@ -416,8 +428,9 @@ class WebSocketClient:
 
         return resp
 
-    async def off(self, *pins: PinInput) -> Dict[str, Any]:
-        """Turn OFF one or more pins."""
+    async def off(self, *pins: PinArgument) -> Dict[str, Any]:
+        """Turn OFF pins supplied as arguments or one iterable."""
+        pins = _expand_pin_arguments(pins)
         if len(pins) == 1 and isinstance(pins[0], str) and pins[0].strip().lower() == "all":
             return await self.alloff()
 

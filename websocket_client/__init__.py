@@ -1,6 +1,7 @@
 """WebSocket clients for the switching-matrix gateway."""
 
 from .websocket_client import (
+    PinArgument,
     PinInput,
     WebSocketClient,
     WebSocketClientError,
@@ -14,6 +15,7 @@ from .websocket_client import (
 from .websocket_client_sync import WebSocketClientSync
 
 __all__ = [
+    "PinArgument",
     "PinInput",
     "WebSocketClient",
     "WebSocketClientError",

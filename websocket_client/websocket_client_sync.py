@@ -17,9 +17,9 @@ import asyncio
 from typing import Any, Dict, List, Optional, Union
 
 if __package__:
-    from .websocket_client import PinInput, WebSocketClient
+    from .websocket_client import PinArgument, PinInput, WebSocketClient
 else:
-    from websocket_client import PinInput, WebSocketClient
+    from websocket_client import PinArgument, PinInput, WebSocketClient
 
 
 class WebSocketClientSync:
@@ -227,13 +227,13 @@ class WebSocketClientSync:
         client = self._require_client()
         return self._run(client.ping())
 
-    def on(self, *pins: PinInput) -> Dict[str, Any]:
-        """Turn ON one or more pins."""
+    def on(self, *pins: PinArgument) -> Dict[str, Any]:
+        """Turn ON pins supplied as arguments or one iterable."""
         client = self._require_client()
         return self._run(client.on(*pins))
 
-    def off(self, *pins: PinInput) -> Dict[str, Any]:
-        """Turn OFF one or more pins."""
+    def off(self, *pins: PinArgument) -> Dict[str, Any]:
+        """Turn OFF pins supplied as arguments or one iterable."""
         client = self._require_client()
         return self._run(client.off(*pins))
 
