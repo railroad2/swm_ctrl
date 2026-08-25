@@ -40,6 +40,23 @@
             </div>
         </section>
 
+        <section class="measurement-card">
+            <h2>Measurement</h2>
+            <div class="measurement-grid">
+                <span class="status-label">Status</span>
+                <span id="measurement-status" class="badge measurement-idle">Idle</span>
+                <span class="status-label">Type</span>
+                <span id="measurement-type" class="value-text">-</span>
+                <span class="status-label">Current target</span>
+                <span id="measurement-target" class="value-text">-</span>
+                <span class="status-label">Progress</span>
+                <span id="measurement-progress-text" class="value-text">0 / 0</span>
+            </div>
+            <div class="measurement-progress" aria-label="Measurement target progress">
+                <div id="measurement-progress-bar" class="measurement-progress-bar"></div>
+            </div>
+        </section>
+
         <section class="active-card">
             <h2>Active channels</h2>
             <div id="active-list" class="active-list">(none)</div>

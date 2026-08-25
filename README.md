@@ -27,6 +27,12 @@
 * Switching matrix control
     * `websocket_client$ python3 sw_control.py --help`
 
+* Web monitor
+    * The monitor page displays the current IV/CV measurement state, target,
+      and completed target count received through the gateway.
+    * Measurement publications contain channel/row/column progress only;
+      voltage sweep points are not sent to the gateway or browser.
+
 * UART client of RPi pico for debugging
     * `pico_uart/pico_uart_client.py`
     

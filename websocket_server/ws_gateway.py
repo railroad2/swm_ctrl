@@ -33,12 +33,20 @@ if __package__ in (None, ""):
     if repository_root not in sys.path:
         sys.path.insert(0, repository_root)
 
-from pico_uart import (
-    PicoClientError,
-    PicoTransportError,
-    PicoUARTClient,
-    UART_REQUEST_ID_FIELD,
-)
+if __package__ and __package__.startswith("swm_ctrl."):
+    from ..pico_uart import (
+        PicoClientError,
+        PicoTransportError,
+        PicoUARTClient,
+        UART_REQUEST_ID_FIELD,
+    )
+else:
+    from pico_uart import (
+        PicoClientError,
+        PicoTransportError,
+        PicoUARTClient,
+        UART_REQUEST_ID_FIELD,
+    )
 from websockets.exceptions import ConnectionClosed
 
 
@@ -116,6 +124,52 @@ def build_pin_map() -> Dict[str, int]:
     return mapping
 
 
+def parse_measurement_status(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Validate and normalize one measurement-status publication."""
+    status = payload.get("status")
+    kind = payload.get("kind")
+    mode = payload.get("mode")
+    target = payload.get("target")
+    completed = payload.get("completed")
+    total = payload.get("total")
+
+    if status not in (
+        "starting",
+        "running",
+        "stopping",
+        "stopped",
+        "completed",
+        "failed",
+    ):
+        raise ValueError(f"invalid measurement status: {status}")
+    if kind not in ("IV", "CV"):
+        raise ValueError(f"invalid measurement kind: {kind}")
+    if mode not in ("channel", "row", "column"):
+        raise ValueError(f"invalid measurement mode: {mode}")
+    if isinstance(completed, bool) or not isinstance(completed, int):
+        raise ValueError("measurement completed count must be an integer")
+    if isinstance(total, bool) or not isinstance(total, int) or total <= 0:
+        raise ValueError("measurement total must be a positive integer")
+    if not 0 <= completed <= total:
+        raise ValueError("measurement completed count is out of range")
+
+    target_limit = 255 if mode == "channel" else 15
+    if target is not None:
+        if isinstance(target, bool) or not isinstance(target, int):
+            raise ValueError("measurement target must be an integer or null")
+        if not 0 <= target <= target_limit:
+            raise ValueError("measurement target is out of range")
+
+    return {
+        "status": status,
+        "kind": kind,
+        "mode": mode,
+        "target": target,
+        "completed": completed,
+        "total": total,
+    }
+
+
 def peer_name(websocket: Any) -> str:
     """Return readable websocket peer name."""
     try:
@@ -187,6 +241,9 @@ class Gateway:
         self.background_tasks: Set[asyncio.Task] = set()
         self.state_update_pending = False
         self.state_update_task: Optional[asyncio.Task] = None
+        self.measurement_status: Optional[Dict[str, Any]] = None
+        self.measurement_update_pending = False
+        self.measurement_update_task: Optional[asyncio.Task] = None
 
     def websocket_path(self, websocket: Any, path_hint: Optional[str] = None) -> str:
         """
@@ -275,6 +332,7 @@ class Gateway:
                 "source": "gateway",
                 "cached": 1,
                 "data": self.last_pinstat_all,
+                "measurement": self.measurement_status,
             }
 
         resp = await self.refresh_pinstat_all()
@@ -285,6 +343,7 @@ class Gateway:
             "source": "gateway",
             "cached": 0,
             "data": resp,
+            "measurement": self.measurement_status,
         }
 
     async def send_snapshot(self, websocket: Any, *, cached_flag: int) -> bool:
@@ -298,7 +357,42 @@ class Gateway:
             "source": "gateway",
             "cached": cached_flag,
             "data": self.last_pinstat_all,
+            "measurement": self.measurement_status,
         })
+
+    async def broadcast_to_monitors(self, payload: Dict[str, Any]) -> None:
+        """Broadcast one event without allowing slow subscribers to block."""
+        subscribers = list(self.monitor_subscribers)
+
+        async def send_to_subscriber(ws: Any) -> Any:
+            try:
+                ok = await asyncio.wait_for(
+                    safe_send_json(ws, payload),
+                    timeout=WS_BROADCAST_SEND_TIMEOUT,
+                )
+                return None if ok else ws
+            except asyncio.TimeoutError:
+                log.warning(
+                    "Monitor send timed out: peer=%s timeout=%.1fs",
+                    peer_name(ws),
+                    WS_BROADCAST_SEND_TIMEOUT,
+                )
+                return ws
+            except Exception as exc:
+                log.warning(
+                    "Monitor send failed: peer=%s error=%s",
+                    peer_name(ws),
+                    exc,
+                )
+                return ws
+
+        dead = await asyncio.gather(*(
+            send_to_subscriber(ws) for ws in subscribers
+        ))
+
+        for ws in dead:
+            if ws is not None:
+                self.monitor_subscribers.discard(ws)
 
     async def broadcast_state_update(self) -> None:
         """Broadcast latest state snapshot to monitor subscribers only."""
@@ -319,37 +413,7 @@ class Gateway:
                 "data": self.last_pinstat_all,
             }
 
-            subscribers = list(self.monitor_subscribers)
-
-            async def send_to_subscriber(ws: Any) -> Any:
-                try:
-                    ok = await asyncio.wait_for(
-                        safe_send_json(ws, payload),
-                        timeout=WS_BROADCAST_SEND_TIMEOUT,
-                    )
-                    return None if ok else ws
-                except asyncio.TimeoutError:
-                    log.warning(
-                        "Monitor send timed out: peer=%s timeout=%.1fs",
-                        peer_name(ws),
-                        WS_BROADCAST_SEND_TIMEOUT,
-                    )
-                    return ws
-                except Exception as exc:
-                    log.warning(
-                        "Monitor send failed: peer=%s error=%s",
-                        peer_name(ws),
-                        exc,
-                    )
-                    return ws
-
-            dead = await asyncio.gather(*(
-                send_to_subscriber(ws) for ws in subscribers
-            ))
-
-            for ws in dead:
-                if ws is not None:
-                    self.monitor_subscribers.discard(ws)
+            await self.broadcast_to_monitors(payload)
 
             log.info(
                 "Broadcasted pinstat_update to %d monitor subscribers",
@@ -388,6 +452,42 @@ class Gateway:
         while self.state_update_pending:
             self.state_update_pending = False
             await self.broadcast_state_update()
+
+    def schedule_measurement_update(self) -> None:
+        """Coalesce measurement publications and broadcast the latest state."""
+        if not self.monitor_subscribers:
+            return
+
+        self.measurement_update_pending = True
+        task = self.measurement_update_task
+        if task is not None and not task.done():
+            return
+
+        task = asyncio.create_task(self.measurement_update_worker())
+        self.measurement_update_task = task
+        self.background_tasks.add(task)
+        task.add_done_callback(self.measurement_update_done)
+
+    def measurement_update_done(self, task: asyncio.Task) -> None:
+        self.background_tasks.discard(task)
+        if self.measurement_update_task is task:
+            self.measurement_update_task = None
+        if not task.cancelled() and task.exception() is not None:
+            log.error("Measurement update task failed: %s", task.exception())
+
+    async def measurement_update_worker(self) -> None:
+        while self.measurement_update_pending:
+            self.measurement_update_pending = False
+            measurement = self.measurement_status
+            if measurement is None:
+                continue
+            async with self.broadcast_lock:
+                await self.broadcast_to_monitors({
+                    "ok": 1,
+                    "event": "measurement_update",
+                    "source": "gateway",
+                    "measurement": dict(measurement),
+                })
 
     async def subscribe_monitor(self, websocket: Any) -> Dict[str, Any]:
         """Register websocket as monitor subscriber and send current snapshot."""
@@ -471,6 +571,20 @@ class Gateway:
     async def handle_control(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Handle control-only commands."""
         if "gateway" in payload:
+            if payload.get("gateway") == "measurement":
+                try:
+                    measurement = parse_measurement_status(payload)
+                except ValueError as exc:
+                    return json_error(str(exc), path="/control")
+
+                self.measurement_status = measurement
+                self.schedule_measurement_update()
+                return {
+                    "ok": 1,
+                    "event": "measurement_status",
+                    "source": "gateway",
+                    "measurement": measurement,
+                }
             return json_error(
                 "control endpoint does not accept gateway commands",
                 path="/control",

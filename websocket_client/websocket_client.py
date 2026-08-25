@@ -342,6 +342,32 @@ class WebSocketClient:
 
         return mapping
 
+    async def publish_measurement_status(
+        self,
+        *,
+        status: str,
+        kind: str,
+        mode: str,
+        target: Optional[int],
+        completed: int,
+        total: int,
+    ) -> Dict[str, Any]:
+        """Publish target-level measurement progress through /control."""
+        resp = await self._send_and_recv({
+            "gateway": "measurement",
+            "status": status,
+            "kind": kind,
+            "mode": mode,
+            "target": target,
+            "completed": completed,
+            "total": total,
+        })
+        if resp.get("ok") != 1 or resp.get("event") != "measurement_status":
+            raise WebSocketProtocolError(
+                f"unexpected measurement status response: {resp}"
+            )
+        return resp
+
     async def subscribe(self) -> Dict[str, Any]:
         """
         Subscribe to state updates.

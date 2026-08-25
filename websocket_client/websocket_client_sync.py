@@ -199,6 +199,27 @@ class WebSocketClientSync:
         client = self._require_client()
         return self._run(client.pin_map())
 
+    def publish_measurement_status(
+        self,
+        *,
+        status: str,
+        kind: str,
+        mode: str,
+        target: Optional[int],
+        completed: int,
+        total: int,
+    ) -> Dict[str, Any]:
+        """Publish target-level measurement progress through /control."""
+        client = self._require_client()
+        return self._run(client.publish_measurement_status(
+            status=status,
+            kind=kind,
+            mode=mode,
+            target=target,
+            completed=completed,
+            total=total,
+        ))
+
     def subscribe(self) -> Dict[str, Any]:
         """Subscribe to state updates."""
         client = self._require_client()

@@ -8,6 +8,11 @@
     const activeCount = document.getElementById("active-count");
     const activeList = document.getElementById("active-list");
     const refreshBtn = document.getElementById("refresh-btn");
+    const measurementStatus = document.getElementById("measurement-status");
+    const measurementType = document.getElementById("measurement-type");
+    const measurementTarget = document.getElementById("measurement-target");
+    const measurementProgressText = document.getElementById("measurement-progress-text");
+    const measurementProgressBar = document.getElementById("measurement-progress-bar");
 
     wsUri.textContent = config.wsUrl;
 
@@ -44,6 +49,62 @@
         return null;
     }
 
+    function targetLabel(mode, target) {
+        if (!Number.isInteger(target)) {
+            return "-";
+        }
+        if (mode === "channel") {
+            const row = String.fromCharCode("A".charCodeAt(0) + Math.floor(target / 16));
+            const col = String(target % 16).padStart(2, "0");
+            return `Channel ${target} (${row}${col})`;
+        }
+        if (mode === "row") {
+            return `Row ${String.fromCharCode("A".charCodeAt(0) + target)}`;
+        }
+        if (mode === "column") {
+            return `Column ${String(target).padStart(2, "0")}`;
+        }
+        return "-";
+    }
+
+    function renderMeasurement(measurement) {
+        if (!measurement || typeof measurement !== "object") {
+            return;
+        }
+
+        const status = String(measurement.status || "idle");
+        const modeNames = {
+            channel: "Individual pixels",
+            row: "Row-wise",
+            column: "Column-wise",
+        };
+        const completed = Number.isInteger(measurement.completed) ? measurement.completed : 0;
+        const total = Number.isInteger(measurement.total) ? measurement.total : 0;
+        const percent = total > 0 ? Math.max(0, Math.min(100, completed / total * 100)) : 0;
+
+        measurementStatus.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+        measurementStatus.classList.remove(
+            "measurement-idle",
+            "measurement-active",
+            "measurement-completed",
+            "measurement-failed",
+        );
+        if (status === "failed") {
+            measurementStatus.classList.add("measurement-failed");
+        } else if (status === "completed") {
+            measurementStatus.classList.add("measurement-completed");
+        } else if (status === "stopped") {
+            measurementStatus.classList.add("measurement-idle");
+        } else {
+            measurementStatus.classList.add("measurement-active");
+        }
+
+        measurementType.textContent = `${measurement.kind || "-"} · ${modeNames[measurement.mode] || "-"}`;
+        measurementTarget.textContent = targetLabel(measurement.mode, measurement.target);
+        measurementProgressText.textContent = `${completed} / ${total}`;
+        measurementProgressBar.style.width = `${percent}%`;
+    }
+
     const matrixView = new window.MatrixView(matrixRoot, {
         matrixSize: config.matrixSize,
     });
@@ -74,6 +135,10 @@
         }
 
         const pins = extractPinsFromMessage(msg);
+
+        if (msg.measurement) {
+            renderMeasurement(msg.measurement);
+        }
 
         if (pins) {
             const activePins = matrixView.renderPins(pins);
