@@ -306,11 +306,18 @@ class Gateway:
         """
         Serialize Pico access with one async lock.
 
-        Cache is updated automatically when PINSTAT ALL succeeds.
+        Cache is invalidated before state-changing commands and updated
+        automatically when PINSTAT ALL succeeds.
         """
         async with self.lock:
             cmd = payload.get("cmd", "<none>")
             log.info("Pico command: %s", cmd)
+
+            if isinstance(cmd, str) and cmd.upper() in ("ON", "OFF", "ALLOFF"):
+                # The hardware may change even if the response is lost or a
+                # multi-pin command fails partway through. Never serve a
+                # snapshot taken before this command as the current state.
+                self.last_pinstat_all = None
 
             resp = await asyncio.to_thread(self.pico.send, payload)
 
@@ -615,4 +622,3 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
-

@@ -292,6 +292,13 @@ class PicoUARTClient:
 
                 last_json_obj = obj
 
+                # Firmware errors don't include a cmd field. UART access is
+                # serialized, so an error received while this request is in
+                # flight belongs to the current command and must be returned
+                # immediately instead of being discarded until timeout.
+                if obj.get("ok") == 0:
+                    return obj
+
                 if self._is_matching_response(cmd, obj):
                     return obj
 
@@ -461,4 +468,3 @@ class PicoUARTClient:
                 "Invalid PCFSTAT response: expected one presence value"
             )
         return response
-

@@ -10,7 +10,7 @@
         return {
             matrixSize: Number(base.matrixSize || 16),
             reconnectMs: Number(base.reconnectMs || 1500),
-            wsUrl: getSearchParam("ws") || base.wsUrl || "ws://swmgate:8765",
+            wsUrl: getSearchParam("ws") || base.wsUrl || "ws://swmgate:8766/monitor",
         };
     }
 

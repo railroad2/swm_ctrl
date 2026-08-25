@@ -64,6 +64,7 @@ import json
 import sys
 import time
 from typing import Dict, List
+from urllib.parse import urlsplit, urlunsplit
 
 from daq_client_sync import DAQClientSync
 
@@ -260,11 +261,29 @@ def strip_endpoint_suffix(uri: str) -> str:
     return uri.rstrip("/")
 
 
+def replace_uri_port(uri: str, port: int) -> str:
+    """Return a WebSocket URI with its TCP port replaced."""
+    parsed = urlsplit(uri)
+    if not parsed.hostname:
+        raise ValueError(f"invalid WebSocket URI: {uri}")
+
+    host = parsed.hostname
+    if ":" in host:
+        host = f"[{host}]"
+
+    userinfo = ""
+    if "@" in parsed.netloc:
+        userinfo = parsed.netloc.rsplit("@", 1)[0] + "@"
+
+    return urlunsplit(parsed._replace(netloc=f"{userinfo}{host}:{port}"))
+
+
 def derived_monitor_uri(args: argparse.Namespace) -> str:
     """Return monitor URI from explicit option or base URI."""
     if args.monitor_uri:
         return args.monitor_uri
-    return strip_endpoint_suffix(args.uri) + "/monitor"
+    base_uri = replace_uri_port(strip_endpoint_suffix(args.uri), 8766)
+    return base_uri + "/monitor"
 
 
 def derived_control_uri(args: argparse.Namespace) -> str:
