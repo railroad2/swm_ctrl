@@ -20,9 +20,19 @@ import ipaddress
 import json
 import logging
 import os
+import sys
 from typing import Any, Dict, Optional, Set
 
 import websockets
+
+# Support both recommended module execution and direct script execution:
+#   python3 -m websocket_server.ws_gateway
+#   python3 websocket_server/ws_gateway.py
+if __package__ in (None, ""):
+    repository_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if repository_root not in sys.path:
+        sys.path.insert(0, repository_root)
+
 from pico_uart import (
     PicoClientError,
     PicoTransportError,
