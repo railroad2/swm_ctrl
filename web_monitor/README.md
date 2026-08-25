@@ -7,10 +7,17 @@ cd web_monitor
 cp config.js_example config.js
 ```
 
-Serve the files from the `web_monitor` directory:
+Start the monitor with the bundled Python server:
 
 ```bash
-python3 -m http.server 8000 --bind 127.0.0.1
+python3 start_monitor.py
+```
+
+The default address is `127.0.0.1:8000`. To accept connections from other
+computers or select another port:
+
+```bash
+python3 start_monitor.py --host 0.0.0.0 --port 8000
 ```
 
 Open <http://127.0.0.1:8000> in a browser. The WebSocket URI can also be
