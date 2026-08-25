@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 
 """
-daq_client_sync.py
+websocket_client_sync.py
 
-Synchronous wrapper for the async DAQClient.
+Synchronous wrapper for the async WebSocketClient.
 
 This wrapper is intended for:
 - traditional blocking DAQ scripts
@@ -16,16 +16,19 @@ It is NOT ideal for environments that already run an asyncio event loop.
 import asyncio
 from typing import Any, Dict, List, Optional, Union
 
-from daq_client import DAQClient, PinInput
+if __package__:
+    from .websocket_client import PinInput, WebSocketClient
+else:
+    from websocket_client import PinInput, WebSocketClient
 
 
-class DAQClientSync:
+class WebSocketClientSync:
     """
-    Synchronous wrapper around async DAQClient.
+    Synchronous wrapper around async WebSocketClient.
 
     Usage
     -----
-    client = DAQClientSync("ws://127.0.0.1:8765")
+    client = WebSocketClientSync("ws://127.0.0.1:8765")
     client.connect()
     client.on("A00")
     client.off("A00")
@@ -45,7 +48,7 @@ class DAQClientSync:
         self.connect_timeout = connect_timeout
 
         self._loop: Optional[asyncio.AbstractEventLoop] = None
-        self._client: Optional[DAQClient] = None
+        self._client: Optional[WebSocketClient] = None
         self._connected = False
 
     # -----------------------------------------------------------------
@@ -63,10 +66,10 @@ class DAQClientSync:
             self._loop = asyncio.new_event_loop()
         return self._loop
 
-    def _ensure_client(self) -> DAQClient:
+    def _ensure_client(self) -> WebSocketClient:
         """Create async client if needed."""
         if self._client is None:
-            self._client = DAQClient(
+            self._client = WebSocketClient(
                 self.uri,
                 timeout=self.timeout,
                 connect_timeout=self.connect_timeout,
@@ -103,10 +106,10 @@ class DAQClientSync:
 
             raise
 
-    def _require_client(self) -> DAQClient:
+    def _require_client(self) -> WebSocketClient:
         """Return connected client or raise."""
         if self._client is None or not self._connected:
-            raise RuntimeError("DAQClientSync is not connected")
+            raise RuntimeError("WebSocketClientSync is not connected")
         return self._client
 
     def _shutdown_loop(self) -> None:
@@ -170,7 +173,7 @@ class DAQClientSync:
             self._shutdown_loop()
             self._client = None
 
-    def __enter__(self) -> "DAQClientSync":
+    def __enter__(self) -> "WebSocketClientSync":
         self.connect()
         return self
 

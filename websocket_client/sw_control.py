@@ -66,7 +66,10 @@ import time
 from typing import Dict, List
 from urllib.parse import urlsplit, urlunsplit
 
-from daq_client_sync import DAQClientSync
+if __package__:
+    from .websocket_client_sync import WebSocketClientSync
+else:
+    from websocket_client_sync import WebSocketClientSync
 
 
 def ansi(text: str, code: str, enable: bool = True) -> str:
@@ -298,10 +301,10 @@ def cmd_ping(args: argparse.Namespace) -> int:
     monitor_uri = derived_monitor_uri(args)
     control_uri = derived_control_uri(args)
 
-    with DAQClientSync(monitor_uri, timeout=args.timeout) as monitor_client:
+    with WebSocketClientSync(monitor_uri, timeout=args.timeout) as monitor_client:
         monitor_client.gateway_ping()
 
-    with DAQClientSync(control_uri, timeout=args.timeout) as control_client:
+    with WebSocketClientSync(control_uri, timeout=args.timeout) as control_client:
         control_client.ping()
 
     print("PONG")
@@ -310,7 +313,7 @@ def cmd_ping(args: argparse.Namespace) -> int:
 
 def cmd_on(args: argparse.Namespace) -> int:
     """Handle on command."""
-    with DAQClientSync(derived_control_uri(args), timeout=args.timeout) as client:
+    with WebSocketClientSync(derived_control_uri(args), timeout=args.timeout) as client:
         client.on(*args.pins)
     print("SUCCESS")
     return 0
@@ -318,7 +321,7 @@ def cmd_on(args: argparse.Namespace) -> int:
 
 def cmd_off(args: argparse.Namespace) -> int:
     """Handle off command."""
-    with DAQClientSync(derived_control_uri(args), timeout=args.timeout) as client:
+    with WebSocketClientSync(derived_control_uri(args), timeout=args.timeout) as client:
         if len(args.pins) == 1 and args.pins[0].strip().lower() == "all":
             client.alloff()
         else:
@@ -329,7 +332,7 @@ def cmd_off(args: argparse.Namespace) -> int:
 
 def cmd_alloff(args: argparse.Namespace) -> int:
     """Handle alloff command."""
-    with DAQClientSync(derived_control_uri(args), timeout=args.timeout) as client:
+    with WebSocketClientSync(derived_control_uri(args), timeout=args.timeout) as client:
         client.alloff()
     print("SUCCESS")
     return 0
@@ -337,7 +340,7 @@ def cmd_alloff(args: argparse.Namespace) -> int:
 
 def cmd_route(args: argparse.Namespace) -> int:
     """Handle route command."""
-    with DAQClientSync(derived_control_uri(args), timeout=args.timeout) as client:
+    with WebSocketClientSync(derived_control_uri(args), timeout=args.timeout) as client:
         client.route(*args.target)
     print("SUCCESS")
     return 0
@@ -345,7 +348,7 @@ def cmd_route(args: argparse.Namespace) -> int:
 
 def cmd_pinstat(args: argparse.Namespace) -> int:
     """Handle pinstat command."""
-    with DAQClientSync(derived_control_uri(args), timeout=args.timeout) as client:
+    with WebSocketClientSync(derived_control_uri(args), timeout=args.timeout) as client:
         arg = args.arg
 
         if arg == "active":
@@ -372,7 +375,7 @@ def cmd_pinstat(args: argparse.Namespace) -> int:
 
 def cmd_pcfstat(args: argparse.Namespace) -> int:
     """Handle pcfstat command."""
-    with DAQClientSync(derived_control_uri(args), timeout=args.timeout) as client:
+    with WebSocketClientSync(derived_control_uri(args), timeout=args.timeout) as client:
         arg = args.arg
 
         if arg is None or arg.upper() == "ALL":
@@ -393,7 +396,7 @@ def cmd_pcfstat(args: argparse.Namespace) -> int:
 
 def cmd_map(args: argparse.Namespace) -> int:
     """Handle map command."""
-    with DAQClientSync(derived_monitor_uri(args), timeout=args.timeout) as client:
+    with WebSocketClientSync(derived_monitor_uri(args), timeout=args.timeout) as client:
         mapping = client.pin_map()
     print_map(mapping)
     return 0
@@ -413,7 +416,7 @@ def cmd_watch(args: argparse.Namespace) -> int:
     frame = not args.no_frame
     control_uri = derived_control_uri(args)
 
-    with DAQClientSync(control_uri, timeout=args.timeout) as client:
+    with WebSocketClientSync(control_uri, timeout=args.timeout) as client:
         while True:
             resp = client.pinstat("ALL")
             pins = resp["pins"]
@@ -441,7 +444,7 @@ def cmd_follow(args: argparse.Namespace) -> int:
     frame = not args.no_frame
     monitor_uri = derived_monitor_uri(args)
 
-    with DAQClientSync(monitor_uri, timeout=args.timeout) as client:
+    with WebSocketClientSync(monitor_uri, timeout=args.timeout) as client:
         sub_resp = client.subscribe()
 
         try:

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 """
-DAQ client library for the switching-matrix WebSocket gateway.
+WebSocket client library for the switching-matrix gateway.
 
 This client talks to ws_gateway.py running on Raspberry Pi.
 
@@ -26,17 +26,17 @@ import websockets
 _MATRIX_RE = re.compile(r"^([A-Pa-p])(0[0-9]|1[0-5])$")
 
 
-class DAQClientError(Exception):
-    """Base error for DAQ client."""
+class WebSocketClientError(Exception):
+    """Base error for the WebSocket client."""
     pass
 
 
-class DAQTransportError(DAQClientError):
+class WebSocketTransportError(WebSocketClientError):
     """Transport-level error."""
     pass
 
 
-class DAQProtocolError(DAQClientError):
+class WebSocketProtocolError(WebSocketClientError):
     """Protocol-level error."""
     pass
 
@@ -172,8 +172,8 @@ def parse_pin_tokens(tokens: Sequence[PinInput]) -> List[int]:
     return sorted(pins)
 
 
-class DAQClient:
-    """Async DAQ client for the switching-matrix WebSocket gateway."""
+class WebSocketClient:
+    """Async client for the switching-matrix WebSocket gateway."""
 
     def __init__(
         self,
@@ -204,11 +204,11 @@ class DAQClient:
                 timeout=self.connect_timeout,
             )
         except Exception as exc:
-            raise DAQTransportError(f"failed to connect to gateway: {exc}") from exc
+            raise WebSocketTransportError(f"failed to connect to gateway: {exc}") from exc
 
         hello = await self._recv_json(timeout=self.timeout)
         if hello.get("ok") != 1 or hello.get("event") != "connected":
-            raise DAQProtocolError(f"unexpected gateway hello: {hello}")
+            raise WebSocketProtocolError(f"unexpected gateway hello: {hello}")
 
     async def close(self) -> None:
         """Close the WebSocket connection."""
@@ -216,7 +216,7 @@ class DAQClient:
             await self._ws.close()
             self._ws = None
 
-    async def __aenter__(self) -> "DAQClient":
+    async def __aenter__(self) -> "WebSocketClient":
         await self.connect()
         return self
 
@@ -226,7 +226,7 @@ class DAQClient:
     def _require_ws(self):
         """Return active websocket or raise."""
         if self._ws is None:
-            raise DAQTransportError("client is not connected")
+            raise WebSocketTransportError("client is not connected")
         return self._ws
 
     # -----------------------------------------------------------------
@@ -247,15 +247,15 @@ class DAQClient:
             else:
                 msg = await asyncio.wait_for(ws.recv(), timeout=timeout)
         except Exception as exc:
-            raise DAQTransportError(f"failed to receive from gateway: {exc}") from exc
+            raise WebSocketTransportError(f"failed to receive from gateway: {exc}") from exc
 
         try:
             obj = json.loads(msg)
         except json.JSONDecodeError as exc:
-            raise DAQProtocolError(f"gateway returned non-JSON message: {msg!r}") from exc
+            raise WebSocketProtocolError(f"gateway returned non-JSON message: {msg!r}") from exc
 
         if not isinstance(obj, dict):
-            raise DAQProtocolError(f"gateway returned non-object JSON: {obj!r}")
+            raise WebSocketProtocolError(f"gateway returned non-object JSON: {obj!r}")
 
         return obj
 
@@ -271,12 +271,12 @@ class DAQClient:
             try:
                 msg = json.dumps(payload, separators=(",", ":"))
             except (TypeError, ValueError) as exc:
-                raise DAQProtocolError(f"failed to serialize payload: {exc}") from exc
+                raise WebSocketProtocolError(f"failed to serialize payload: {exc}") from exc
 
             try:
                 await asyncio.wait_for(ws.send(msg), timeout=self.timeout)
             except Exception as exc:
-                raise DAQTransportError(f"failed to send to gateway: {exc}") from exc
+                raise WebSocketTransportError(f"failed to send to gateway: {exc}") from exc
 
             resp = await self._recv_json(timeout=self.timeout)
             return resp
@@ -286,10 +286,10 @@ class DAQClient:
         resp = await self._send_and_recv(payload)
 
         if resp.get("ok") != 1:
-            raise DAQProtocolError(f"Pico command failed: {resp}")
+            raise WebSocketProtocolError(f"Pico command failed: {resp}")
 
         if resp.get("cmd") != expected_cmd:
-            raise DAQProtocolError(
+            raise WebSocketProtocolError(
                 f"unexpected command in response: expected {expected_cmd}, got {resp.get('cmd')}, resp={resp}"
             )
 
@@ -304,7 +304,7 @@ class DAQClient:
         resp = await self._send_and_recv({"gateway": "ping"})
 
         if resp.get("ok") != 1 or resp.get("event") != "gateway_pong":
-            raise DAQProtocolError(f"unexpected gateway ping response: {resp}")
+            raise WebSocketProtocolError(f"unexpected gateway ping response: {resp}")
 
         return resp
 
@@ -313,7 +313,7 @@ class DAQClient:
         resp = await self._send_and_recv({"gateway": "get"})
 
         if resp.get("ok") != 1 or resp.get("event") != "get":
-            raise DAQProtocolError(f"unexpected get response: {resp}")
+            raise WebSocketProtocolError(f"unexpected get response: {resp}")
 
         return resp
 
@@ -322,11 +322,11 @@ class DAQClient:
         resp = await self._send_and_recv({"gateway": "map"})
 
         if resp.get("ok") != 1 or resp.get("event") != "map":
-            raise DAQProtocolError(f"unexpected map response: {resp}")
+            raise WebSocketProtocolError(f"unexpected map response: {resp}")
 
         mapping = resp.get("map")
         if not isinstance(mapping, dict):
-            raise DAQProtocolError(f"missing map object: {resp}")
+            raise WebSocketProtocolError(f"missing map object: {resp}")
 
         return mapping
 
@@ -366,7 +366,7 @@ class DAQClient:
                 subscribed = msg
 
         if snapshot is None or subscribed is None:
-            raise DAQProtocolError(
+            raise WebSocketProtocolError(
                 f"unexpected subscribe sequence: first={first}, second={second}"
             )
 
@@ -381,7 +381,7 @@ class DAQClient:
         resp = await self._send_and_recv({"gateway": "unsubscribe"})
 
         if resp.get("ok") != 1 or resp.get("event") != "unsubscribed":
-            raise DAQProtocolError(f"unexpected unsubscribe response: {resp}")
+            raise WebSocketProtocolError(f"unexpected unsubscribe response: {resp}")
 
         return resp
 
@@ -402,7 +402,7 @@ class DAQClient:
         resp = await self._send_pico_command({"cmd": "PING"}, "PING")
 
         if resp.get("pong") != 1:
-            raise DAQProtocolError(f"missing or invalid pong field: {resp}")
+            raise WebSocketProtocolError(f"missing or invalid pong field: {resp}")
 
         return resp
 
@@ -412,7 +412,7 @@ class DAQClient:
         resp = await self._send_pico_command({"cmd": "ON", "pins": parsed}, "ON")
 
         if not isinstance(resp.get("results"), list):
-            raise DAQProtocolError(f"missing results field: {resp}")
+            raise WebSocketProtocolError(f"missing results field: {resp}")
 
         return resp
 
@@ -425,7 +425,7 @@ class DAQClient:
         resp = await self._send_pico_command({"cmd": "OFF", "pins": parsed}, "OFF")
 
         if not isinstance(resp.get("results"), list):
-            raise DAQProtocolError(f"missing results field: {resp}")
+            raise WebSocketProtocolError(f"missing results field: {resp}")
 
         return resp
 
@@ -459,7 +459,7 @@ class DAQClient:
         resp = await self._send_pico_command({"cmd": "PINSTAT", "which": which}, "PINSTAT")
 
         if not isinstance(resp.get("pins"), list):
-            raise DAQProtocolError(f"missing pins list: {resp}")
+            raise WebSocketProtocolError(f"missing pins list: {resp}")
 
         return resp
 
@@ -476,10 +476,10 @@ class DAQClient:
         present = resp.get("present")
         if which == "ALL":
             if not isinstance(present, list):
-                raise DAQProtocolError(f"missing present list: {resp}")
+                raise WebSocketProtocolError(f"missing present list: {resp}")
         else:
             if not isinstance(present, int):
-                raise DAQProtocolError(f"missing single present value: {resp}")
+                raise WebSocketProtocolError(f"missing single present value: {resp}")
 
         return resp
 
@@ -496,4 +496,3 @@ class DAQClient:
     async def active_labels(self) -> List[str]:
         """Return currently active matrix labels such as A00, D09."""
         return [pin_to_label(pin) for pin in await self.active_pins()]
-

@@ -25,7 +25,7 @@
     * The websocket IRL is `ws://<server ip>:8765` for control and `ws://<server ip>:8766` for monitoring.
     
 * Switching matrix control
-    * `daq_client$ python3 sw_control.py --help`
+    * `websocket_client$ python3 sw_control.py --help`
 
 * UART client of RPi pico for debugging
     * `pico_uart/pico_uart_client.py`
