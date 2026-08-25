@@ -5,6 +5,10 @@ import json
 from Switching256ch import Switching256ch
 
 
+UART_REQUEST_ID_FIELD = "uart_request_id"
+MAX_UART_REQUEST_ID = 2147483647
+
+
 class PicoState:
     """State names for the command processor."""
 
@@ -34,6 +38,7 @@ class Controller:
         self.state = PicoState.IDLE
         self.sw = Switching256ch()
         self.shadow = [0] * 256
+        self.uart_request_id = None
 
     # -------------------------------------------------------------------------
     # State helpers
@@ -41,6 +46,10 @@ class Controller:
     def set_state(self, state: str) -> None:
         """Update internal state."""
         self.state = state
+
+    def clear_request_context(self) -> None:
+        """Clear the UART request ID after a response has been emitted."""
+        self.uart_request_id = None
 
     # -------------------------------------------------------------------------
     # Response builders
@@ -51,6 +60,8 @@ class Controller:
             "ok": 1,
             "state": self.state,
         }
+        if self.uart_request_id is not None:
+            out[UART_REQUEST_ID_FIELD] = self.uart_request_id
         out.update(payload)
         return json.dumps(out)
 
@@ -61,6 +72,8 @@ class Controller:
             "state": self.state,
             "error": str(error),
         }
+        if self.uart_request_id is not None:
+            out[UART_REQUEST_ID_FIELD] = self.uart_request_id
         out.update(payload)
         return json.dumps(out)
 
@@ -100,6 +113,16 @@ class Controller:
             raise CommandError("pcf id out of range")
 
         return pcf
+
+    def _validate_uart_request_id(self, request_id) -> int:
+        """Validate and return one host-generated UART request ID."""
+        if isinstance(request_id, bool) or not isinstance(request_id, int):
+            raise CommandError("uart_request_id must be integer")
+
+        if request_id < 1 or request_id > MAX_UART_REQUEST_ID:
+            raise CommandError("uart_request_id out of range")
+
+        return request_id
 
     # -------------------------------------------------------------------------
     # Commands
@@ -230,8 +253,15 @@ class Controller:
     # -------------------------------------------------------------------------
     def handle_json_object(self, obj) -> str:
         """Validate and dispatch one parsed JSON object."""
+        self.clear_request_context()
+
         if not isinstance(obj, dict):
             raise CommandError("JSON root must be object")
+
+        if UART_REQUEST_ID_FIELD in obj:
+            self.uart_request_id = self._validate_uart_request_id(
+                obj.get(UART_REQUEST_ID_FIELD)
+            )
 
         cmd = obj.get("cmd")
         if not isinstance(cmd, str):
@@ -276,6 +306,8 @@ class Controller:
 
     def handle_json_line(self, line: str) -> str:
         """Parse and handle one JSON command line."""
+        self.clear_request_context()
+
         if not isinstance(line, str):
             raise CommandError("internal error: line must be string")
 
@@ -289,4 +321,3 @@ class Controller:
             raise CommandError("invalid JSON")
 
         return self.handle_json_object(obj)
-

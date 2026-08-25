@@ -6,6 +6,7 @@ from .pico_uart_client import (
     PicoTimeoutError,
     PicoTransportError,
     PicoUARTClient,
+    UART_REQUEST_ID_FIELD,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "PicoTimeoutError",
     "PicoTransportError",
     "PicoUARTClient",
+    "UART_REQUEST_ID_FIELD",
 ]

@@ -96,12 +96,14 @@ def main() -> None:
 
                     response = ctl.handle_json_line(line)
                     uart_write_line(uart, response)
+                    ctl.clear_request_context()
 
                     ctl.set_state(PicoState.IDLE)
 
                 except CommandError as exc:
                     ctl.set_state(PicoState.ERROR)
                     uart_write_line(uart, ctl.build_error(str(exc)))
+                    ctl.clear_request_context()
                     ctl.set_state(PicoState.IDLE)
 
                 except Exception as exc:
@@ -113,6 +115,7 @@ def main() -> None:
                             detail=str(exc),
                         ),
                     )
+                    ctl.clear_request_context()
                     ctl.set_state(PicoState.IDLE)
 
                 continue
@@ -121,6 +124,7 @@ def main() -> None:
             if len(rx_buf) >= MAX_LINE_LENGTH:
                 rx_buf = bytearray()
                 ctl.set_state(PicoState.ERROR)
+                ctl.clear_request_context()
                 uart_write_line(
                     uart,
                     ctl.build_error(
@@ -145,10 +149,10 @@ def main() -> None:
                     detail=str(exc),
                 ),
             )
+            ctl.clear_request_context()
             ctl.set_state(PicoState.IDLE)
             utime.sleep_ms(10)
 
 
 if __name__ == "__main__":
     main()
-

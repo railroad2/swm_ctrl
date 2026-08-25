@@ -27,6 +27,7 @@ from pico_uart import (
     PicoClientError,
     PicoTransportError,
     PicoUARTClient,
+    UART_REQUEST_ID_FIELD,
 )
 from websockets.exceptions import ConnectionClosed
 
@@ -227,6 +228,10 @@ class Gateway:
                 except PicoClientError as reopen_exc:
                     log.error("UART reopen failed: %s", reopen_exc)
                 raise
+
+            # UART correlation is internal to the gateway/Pico transport.
+            # Do not expose it through WebSocket responses or state snapshots.
+            resp.pop(UART_REQUEST_ID_FIELD, None)
 
             if (
                 isinstance(resp, dict)

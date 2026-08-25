@@ -7,6 +7,10 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 import serial
 
 
+UART_REQUEST_ID_FIELD = "uart_request_id"
+MAX_UART_REQUEST_ID = 2_147_483_647
+
+
 class PicoClientError(Exception):
     """Base exception for Pico UART client errors."""
     pass
@@ -35,7 +39,7 @@ class PicoUARTClient:
     - One command at a time
     - One JSON line request -> one JSON line response
     - Ignore non-JSON noise lines
-    - Use strict request-response matching by 'cmd'
+    - Use strict request-response matching by UART request ID
     """
 
     def __init__(
@@ -67,6 +71,7 @@ class PicoUARTClient:
         self._ser: Optional[serial.Serial] = None
         self._lock = threading.Lock()
         self._noise_lines: List[str] = []
+        self._next_uart_request_id = 1
 
         if auto_open:
             self.open()
@@ -241,14 +246,25 @@ class PicoUARTClient:
 
         return obj
 
-    def _is_matching_response(self, expected_cmd: str, obj: Dict[str, Any]) -> bool:
+    def _allocate_uart_request_id(self) -> int:
+        """Allocate the next positive UART request ID.
+
+        The caller must hold ``self._lock``.
         """
-        Check whether a received JSON object matches the command we are waiting for.
+        request_id = self._next_uart_request_id
+        self._next_uart_request_id += 1
+        if self._next_uart_request_id > MAX_UART_REQUEST_ID:
+            self._next_uart_request_id = 1
+        return request_id
+
+    def _is_matching_response(self, expected_request_id: int, obj: Dict[str, Any]) -> bool:
         """
-        cmd = obj.get("cmd")
-        if not isinstance(cmd, str):
+        Check whether a received JSON object matches the request we are waiting for.
+        """
+        request_id = obj.get(UART_REQUEST_ID_FIELD)
+        if isinstance(request_id, bool) or not isinstance(request_id, int):
             return False
-        return cmd.strip().upper() == expected_cmd.strip().upper()
+        return request_id == expected_request_id
 
     # -------------------------------------------------------------------------
     # Core request-response
@@ -284,13 +300,16 @@ class PicoUARTClient:
 
         with self._lock:
             ser = self._require_serial()
+            request_id = self._allocate_uart_request_id()
+            request_payload = dict(payload)
+            request_payload[UART_REQUEST_ID_FIELD] = request_id
 
             if resync_before_send:
                 self._log("resync requested before send")
                 self._drain_input(duration=0.2)
 
             try:
-                message = json.dumps(payload, separators=(",", ":")) + "\n"
+                message = json.dumps(request_payload, separators=(",", ":")) + "\n"
             except (TypeError, ValueError) as exc:
                 raise PicoProtocolError(f"Failed to serialize JSON payload: {exc}") from exc
 
@@ -318,14 +337,7 @@ class PicoUARTClient:
 
                 last_json_obj = obj
 
-                # Firmware errors don't include a cmd field. UART access is
-                # serialized, so an error received while this request is in
-                # flight belongs to the current command and must be returned
-                # immediately instead of being discarded until timeout.
-                if obj.get("ok") == 0:
-                    return obj
-
-                if self._is_matching_response(cmd, obj):
+                if self._is_matching_response(request_id, obj):
                     return obj
 
                 # Keep unmatched JSON as noise-like diagnostic data.
@@ -334,6 +346,7 @@ class PicoUARTClient:
 
             detail = {
                 "expected_cmd": cmd,
+                "expected_uart_request_id": request_id,
                 "last_json_obj": last_json_obj,
             }
             raise PicoTimeoutError(f"Timed out waiting for response: {detail}")

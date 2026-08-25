@@ -218,6 +218,28 @@ def test_echo(t: PicoTester) -> None:
         raise TestFailure(f"Unexpected echo payload: {resp}")
 
 
+def test_uart_request_id(t: PicoTester) -> None:
+    """Test request ID echoing for both successful and failed commands."""
+    success_id = 1234
+    success = t.send_json_and_expect_json({
+        "uart_request_id": success_id,
+        "cmd": "PING",
+    })
+    t.assert_ok(success, "PING with uart_request_id")
+    if success.get("uart_request_id") != success_id:
+        raise TestFailure(f"Success response request ID mismatch: {success}")
+
+    error_id = 1235
+    error = t.send_json_and_expect_json({
+        "uart_request_id": error_id,
+        "cmd": "ON",
+        "pins": [999],
+    })
+    t.assert_error(error)
+    if error.get("uart_request_id") != error_id:
+        raise TestFailure(f"Error response request ID mismatch: {error}")
+
+
 def test_on_off(t: PicoTester) -> None:
     """Test ON and OFF commands."""
     resp_on = t.send_json_and_expect_json({"cmd": "ON", "pins": [3, 5]})
@@ -450,6 +472,7 @@ def main() -> int:
         tests = [
             ("ping", test_ping),
             ("echo", test_echo),
+            ("uart request id", test_uart_request_id),
             ("on/off", test_on_off),
             ("alloff", test_alloff),
             ("pinstat all", test_pinstat_all),
