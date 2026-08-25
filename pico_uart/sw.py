@@ -15,24 +15,10 @@ Main goals:
 """
 
 import argparse
-import json
 import re
-import serial
 import sys
-import time
 
-# ----------------------------------------------------------------------
-# Serial configuration
-# ----------------------------------------------------------------------
-
-PORT = "/dev/serial0"
-BAUDRATE = 115200
-
-READ_TIMEOUT = 0.2
-CMD_TIMEOUT = 3.0
-
-# Short delay to allow UART to stabilize after opening
-STARTUP_SETTLE = 0.02
+from pico_uart_client import PicoUARTClient
 
 # ----------------------------------------------------------------------
 # Matrix constants
@@ -198,68 +184,10 @@ def parse_pins(tokens):
     return sorted(pins)
 
 
-# ----------------------------------------------------------------------
-# UART communication
-# ----------------------------------------------------------------------
-
-def open_serial():
-    """
-    Open UART connection to Pico.
-    """
-
-    ser = serial.Serial(
-        PORT,
-        BAUDRATE,
-        timeout=READ_TIMEOUT
-    )
-
-    # Allow line discipline to settle
-    time.sleep(STARTUP_SETTLE)
-
-    ser.reset_input_buffer()
-
-    return ser
-
-
-def read_json(ser):
-    """
-    Read JSON response from UART.
-    """
-
-    deadline = time.time() + CMD_TIMEOUT
-
-    while time.time() < deadline:
-
-        line = ser.readline()
-
-        if not line:
-            continue
-
-        try:
-            obj = json.loads(line.decode())
-        except:
-            continue
-
-        if isinstance(obj, dict):
-            return obj
-
-    raise RuntimeError("timeout waiting for device response")
-
-
 def send(payload):
-    """
-    Send command to Pico and wait for response.
-    """
-
-    ser = open_serial()
-
-    ser.write((json.dumps(payload) + "\n").encode())
-
-    resp = read_json(ser)
-
-    ser.close()
-
-    return resp
+    """Send one command to Pico and wait for its response."""
+    with PicoUARTClient(command_timeout=3.0) as client:
+        return client.send_command(payload)
 
 
 # ----------------------------------------------------------------------

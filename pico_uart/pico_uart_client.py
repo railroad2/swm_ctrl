@@ -2,7 +2,7 @@
 import json
 import threading
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import serial
 
@@ -305,6 +305,53 @@ class PicoUARTClient:
             }
             raise PicoTimeoutError(f"Timed out waiting for response: {detail}")
 
+    def _send_checked(
+        self,
+        payload: Dict[str, Any],
+        expected_cmd: str,
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Send a command and require a successful matching response."""
+        response = self.send_command(payload, timeout=timeout)
+
+        if response.get("ok") != 1:
+            raise PicoProtocolError(f"Pico command failed: {response}")
+
+        if response.get("cmd") != expected_cmd:
+            raise PicoProtocolError(
+                f"Unexpected command response: expected {expected_cmd}, "
+                f"got {response.get('cmd')}"
+            )
+
+        return response
+
+    @staticmethod
+    def _validate_pins(pins: Sequence[int]) -> List[int]:
+        """Validate channel numbers for ON/OFF commands."""
+        if not pins:
+            raise ValueError("pins must not be empty")
+
+        validated = []
+        for pin in pins:
+            if isinstance(pin, bool) or not isinstance(pin, int):
+                raise ValueError(f"pin must be integer: {pin!r}")
+            if not 0 <= pin <= 255:
+                raise ValueError(f"pin out of range: {pin}")
+            validated.append(pin)
+
+        return validated
+
+    @staticmethod
+    def _validate_pcf(which: Union[str, int]) -> Union[str, int]:
+        """Validate a PCF selector accepted by PINSTAT/PCFSTAT."""
+        if which == "ALL":
+            return which
+        if isinstance(which, bool) or not isinstance(which, int):
+            raise ValueError("which must be 'ALL' or integer 0..15")
+        if not 0 <= which <= 15:
+            raise ValueError("pcf id out of range (0..15)")
+        return which
+
     # -------------------------------------------------------------------------
     # High-level command helpers
     # -------------------------------------------------------------------------
@@ -320,16 +367,98 @@ class PicoUARTClient:
 
     def ping(self, timeout: Optional[float] = None) -> Tuple[bool, Optional[Dict[str, Any]]]:
         """
-        Basic health check using ECHO.
+        Basic health check using the Pico PING command.
 
         Returns:
             (True, response) on success
             (False, None) on failure
         """
         try:
-            response = self.echo("PING", timeout=timeout)
+            response = self._send_checked(
+                {"cmd": "PING"},
+                "PING",
+                timeout=timeout,
+            )
+            if response.get("pong") != 1:
+                raise PicoProtocolError(f"Missing or invalid pong field: {response}")
             return True, response
         except PicoClientError as exc:
             self._log(f"ping failed: {exc}")
             return False, None
+
+    def on(self, pins: Sequence[int], timeout: Optional[float] = None) -> Dict[str, Any]:
+        """Turn ON one or more channels."""
+        validated = self._validate_pins(pins)
+        return self._send_checked(
+            {"cmd": "ON", "pins": validated},
+            "ON",
+            timeout=timeout,
+        )
+
+    def off(self, pins: Sequence[int], timeout: Optional[float] = None) -> Dict[str, Any]:
+        """Turn OFF one or more channels."""
+        validated = self._validate_pins(pins)
+        return self._send_checked(
+            {"cmd": "OFF", "pins": validated},
+            "OFF",
+            timeout=timeout,
+        )
+
+    def alloff(self, timeout: Optional[float] = None) -> Dict[str, Any]:
+        """Turn OFF all channels."""
+        return self._send_checked(
+            {"cmd": "ALLOFF"},
+            "ALLOFF",
+            timeout=timeout,
+        )
+
+    def route(self, pin: int, timeout: Optional[float] = None) -> Dict[str, Any]:
+        """Turn OFF all channels and then turn ON exactly one channel."""
+        self._validate_pins([pin])
+        self.alloff(timeout=timeout)
+        return self.on([pin], timeout=timeout)
+
+    def pinstat(
+        self,
+        which: Union[str, int] = "ALL",
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Return channel state for all channels or one PCF block."""
+        selector = self._validate_pcf(which)
+        response = self._send_checked(
+            {"cmd": "PINSTAT", "which": selector},
+            "PINSTAT",
+            timeout=timeout,
+        )
+        pins = response.get("pins")
+        expected_length = 256 if selector == "ALL" else 16
+        if not isinstance(pins, list) or len(pins) != expected_length:
+            raise PicoProtocolError(
+                f"Invalid PINSTAT response: expected {expected_length} pins"
+            )
+        return response
+
+    def pcfstat(
+        self,
+        which: Union[str, int] = "ALL",
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Return PCF presence for all chips or one chip."""
+        selector = self._validate_pcf(which)
+        response = self._send_checked(
+            {"cmd": "PCFSTAT", "which": selector},
+            "PCFSTAT",
+            timeout=timeout,
+        )
+        present = response.get("present")
+        if selector == "ALL":
+            if not isinstance(present, list) or len(present) != 16:
+                raise PicoProtocolError(
+                    "Invalid PCFSTAT response: expected 16 presence values"
+                )
+        elif isinstance(present, bool) or not isinstance(present, int):
+            raise PicoProtocolError(
+                "Invalid PCFSTAT response: expected one presence value"
+            )
+        return response
 

@@ -28,6 +28,6 @@
     * `daq_client$ python3 sw_control.py --help`
 
 * UART client of RPi pico for debugging
-    * `uart_client/pico_uart_client.py`
+    * `pico_uart/pico_uart_client.py`
     
 
