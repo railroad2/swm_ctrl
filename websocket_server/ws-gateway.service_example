@@ -7,8 +7,8 @@ Wants=network-online.target
 Type=simple
 User=lgad
 Group=lgad
-WorkingDirectory=/home/lgad/swm_ctrl/websocket_server
-ExecStart=/usr/bin/python3 /home/lgad/swm_ctrl/websocket_server/ws_gateway.py
+WorkingDirectory=/home/lgad/swm_ctrl
+ExecStart=/usr/bin/python3 -m websocket_server.ws_gateway
 Restart=always
 RestartSec=2
 

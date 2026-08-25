@@ -20,12 +20,14 @@ import ipaddress
 import json
 import logging
 import os
-import threading
-import time
 from typing import Any, Dict, Optional, Set
 
-import serial
 import websockets
+from pico_uart import (
+    PicoClientError,
+    PicoTransportError,
+    PicoUARTClient,
+)
 from websockets.exceptions import ConnectionClosed
 
 
@@ -159,124 +161,13 @@ async def safe_send_json(websocket: Any, payload: Dict[str, Any]) -> bool:
 
 
 # ---------------------------------------------------------------------
-# UART Pico client
-# ---------------------------------------------------------------------
-
-class PicoUART:
-    """Persistent UART client for Pico JSON command firmware."""
-
-    def __init__(self) -> None:
-        self.ser: Optional[serial.Serial] = None
-        self.lock = threading.Lock()
-
-    def open(self) -> None:
-        """Open UART if not already open."""
-        if self.ser and self.ser.is_open:
-            return
-
-        log.info("Opening UART %s @ %d", UART_PORT, UART_BAUDRATE)
-
-        self.ser = serial.Serial(
-            UART_PORT,
-            UART_BAUDRATE,
-            timeout=UART_READ_TIMEOUT,
-            write_timeout=UART_WRITE_TIMEOUT,
-            xonxoff=False,
-            rtscts=False,
-            dsrdtr=False,
-        )
-
-        time.sleep(UART_STARTUP_SETTLE)
-        self.ser.reset_input_buffer()
-        self.ser.reset_output_buffer()
-        self.drain()
-
-        log.info("UART opened")
-
-    def close(self) -> None:
-        """Close UART if open."""
-        if self.ser and self.ser.is_open:
-            self.ser.close()
-            log.info("UART closed")
-        self.ser = None
-
-    def reopen(self) -> None:
-        """Close and reopen UART."""
-        log.warning("Reopening UART")
-        self.close()
-        self.open()
-
-    def drain(self) -> None:
-        """Drain pending UART input for a short time."""
-        deadline = time.monotonic() + UART_DRAIN_DURATION
-
-        while time.monotonic() < deadline:
-            line = self.ser.readline()
-            if not line:
-                continue
-
-    def read_json(self) -> Dict[str, Any]:
-        """
-        Read one JSON object response from UART.
-
-        Non-JSON lines are ignored to tolerate noise or startup text.
-        """
-        deadline = time.monotonic() + UART_COMMAND_TIMEOUT
-        last_line = None
-
-        while time.monotonic() < deadline:
-            raw = self.ser.readline()
-
-            if not raw:
-                continue
-
-            line = raw.decode("utf-8", errors="replace").strip()
-
-            if not line:
-                continue
-
-            last_line = line
-
-            try:
-                obj = json.loads(line)
-            except Exception:
-                continue
-
-            if isinstance(obj, dict):
-                return obj
-
-        raise RuntimeError(f"UART timeout (last_line={last_line!r})")
-
-    def send(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Send one JSON command to Pico and return one JSON response.
-
-        UART access is serialized with a thread lock.
-        """
-        with self.lock:
-            if not self.ser or not self.ser.is_open:
-                self.open()
-
-            msg = json.dumps(payload, separators=(",", ":")) + "\n"
-
-            try:
-                self.ser.write(msg.encode("utf-8"))
-                self.ser.flush()
-            except Exception:
-                self.reopen()
-                raise
-
-            return self.read_json()
-
-
-# ---------------------------------------------------------------------
 # Gateway server
 # ---------------------------------------------------------------------
 
 class Gateway:
     """Async WebSocket gateway around the persistent Pico UART client."""
 
-    def __init__(self, pico: PicoUART) -> None:
+    def __init__(self, pico: PicoUARTClient) -> None:
         self.pico = pico
         self.lock = asyncio.Lock()
         self.broadcast_lock = asyncio.Lock()
@@ -324,7 +215,18 @@ class Gateway:
                 # snapshot taken before this command as the current state.
                 self.last_pinstat_all = None
 
-            resp = await asyncio.to_thread(self.pico.send, payload)
+            try:
+                resp = await asyncio.to_thread(
+                    self.pico.send_command,
+                    payload,
+                )
+            except PicoTransportError:
+                log.warning("UART transport failed; reopening connection")
+                try:
+                    await asyncio.to_thread(self.pico.reopen)
+                except PicoClientError as reopen_exc:
+                    log.error("UART reopen failed: %s", reopen_exc)
+                raise
 
             if (
                 isinstance(resp, dict)
@@ -659,8 +561,20 @@ class Gateway:
 # ---------------------------------------------------------------------
 
 async def main() -> None:
-    pico = PicoUART()
+    pico = PicoUARTClient(
+        port=UART_PORT,
+        baudrate=UART_BAUDRATE,
+        read_timeout=UART_READ_TIMEOUT,
+        write_timeout=UART_WRITE_TIMEOUT,
+        command_timeout=UART_COMMAND_TIMEOUT,
+        startup_settle=UART_STARTUP_SETTLE,
+        startup_drain=UART_DRAIN_DURATION,
+        auto_open=False,
+    )
+
+    log.info("Opening UART %s @ %d", UART_PORT, UART_BAUDRATE)
     pico.open()
+    log.info("UART opened")
 
     gateway = Gateway(pico)
 
@@ -672,13 +586,17 @@ async def main() -> None:
         # Port 8766 is always monitor, regardless of the requested URL path.
         await gateway.handle(websocket, "/monitor")
 
-    async with (
-        websockets.serve(control_handler, WS_HOST, WS_CONTROL_PORT),
-        websockets.serve(monitor_handler, WS_HOST, WS_MONITOR_PORT)
-    ):
-        log.info("Control WebSocket running on ws://%s:%d", WS_HOST, WS_CONTROL_PORT)
-        log.info("Monitor WebSocket running on ws://%s:%d", WS_HOST, WS_MONITOR_PORT)
-        await asyncio.Future()
+    try:
+        async with (
+            websockets.serve(control_handler, WS_HOST, WS_CONTROL_PORT),
+            websockets.serve(monitor_handler, WS_HOST, WS_MONITOR_PORT)
+        ):
+            log.info("Control WebSocket running on ws://%s:%d", WS_HOST, WS_CONTROL_PORT)
+            log.info("Monitor WebSocket running on ws://%s:%d", WS_HOST, WS_MONITOR_PORT)
+            await asyncio.Future()
+    finally:
+        await asyncio.to_thread(pico.close)
+        log.info("UART closed")
 
 
 if __name__ == "__main__":

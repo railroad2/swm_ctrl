@@ -14,8 +14,8 @@
 
 * Set the gateway
     * Set the UART communication between the raspberry pi (gateway) and the RPi pico.
-    * modify the path of ExecStart in the `websocket_server/ws-gateway.service` file.
-    * copy ws-gateway.service in /etc/systemd/system/
+    * modify `WorkingDirectory` in `websocket_server/ws-gateway.service_example` to the repository path.
+    * copy `websocket_server/ws-gateway.service_example` to `/etc/systemd/system/ws-gateway.service`.
     * Run daemon
         * `$ sudo systemctl daemon-reload`
         * `$ sudo systemctl enable ws-gateway`
@@ -30,4 +30,3 @@
 * UART client of RPi pico for debugging
     * `pico_uart/pico_uart_client.py`
     
-

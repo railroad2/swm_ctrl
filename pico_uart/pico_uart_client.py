@@ -45,6 +45,8 @@ class PicoUARTClient:
         read_timeout: float = 0.05,
         write_timeout: float = 1.0,
         command_timeout: float = 2.0,
+        startup_settle: float = 0.0,
+        startup_drain: float = 0.0,
         auto_open: bool = True,
         debug: bool = False,
     ) -> None:
@@ -53,7 +55,14 @@ class PicoUARTClient:
         self.read_timeout = read_timeout
         self.write_timeout = write_timeout
         self.command_timeout = command_timeout
+        self.startup_settle = startup_settle
+        self.startup_drain = startup_drain
         self.debug = debug
+
+        if self.startup_settle < 0:
+            raise ValueError("startup_settle must be non-negative")
+        if self.startup_drain < 0:
+            raise ValueError("startup_drain must be non-negative")
 
         self._ser: Optional[serial.Serial] = None
         self._lock = threading.Lock()
@@ -83,9 +92,20 @@ class PicoUARTClient:
                 rtscts=False,
                 dsrdtr=False,
             )
+
+            if self.startup_settle:
+                time.sleep(self.startup_settle)
+
             self._ser.reset_input_buffer()
             self._ser.reset_output_buffer()
+
+            if self.startup_drain:
+                self._drain_input(duration=self.startup_drain)
+        except PicoTransportError:
+            self.close()
+            raise
         except serial.SerialException as exc:
+            self.close()
             raise PicoTransportError(f"Failed to open serial port {self.port}: {exc}") from exc
 
     def close(self) -> None:
@@ -96,6 +116,12 @@ class PicoUARTClient:
                     self._ser.close()
             finally:
                 self._ser = None
+
+    def reopen(self) -> None:
+        """Close and reopen the UART connection safely."""
+        with self._lock:
+            self.close()
+            self.open()
 
     def __enter__(self) -> "PicoUARTClient":
         self.open()
