@@ -22,13 +22,12 @@
         * `$ sudo systemctl start ws-gateway`
     * To see the log
         * `$ journalctl -u ws-gateway`
-    * The websocket IRL is `ws://<server ip>:8765`. 
+    * The websocket IRL is `ws://<server ip>:8765` for control and `ws://<server ip>:8766` for monitoring.
     
-* switching matrix control
+* Switching matrix control
     * `daq_client$ python3 sw_control.py --help`
 
-* UART client of RPi pico
-    * `pico_uart_client`
-    * for debugging
+* UART client of RPi pico for debugging
+    * `uart_client/pico_uart_client.py`
     
 
