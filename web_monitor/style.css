@@ -46,10 +46,11 @@ h2 {
 
 .status-panel,
 .measurement-panel,
+.measurement-card,
 .toolbar-card,
 .matrix-card,
 .active-card {
-    background: #f3f6fa;
+    background: #ffffff;
     border: 1px solid #bcc7d6;
     border-radius: 16px;
     box-shadow: 0 8px 20px rgba(30, 41, 59, 0.08);
