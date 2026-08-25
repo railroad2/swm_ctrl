@@ -42,6 +42,7 @@ UART_COMMAND_TIMEOUT = 3.0
 
 UART_STARTUP_SETTLE = 0.02
 UART_DRAIN_DURATION = 0.01
+WS_BROADCAST_SEND_TIMEOUT = 1.0
 
 WS_HOST = "0.0.0.0"
 WS_CONTROL_PORT = 8765
@@ -278,8 +279,12 @@ class Gateway:
     def __init__(self, pico: PicoUART) -> None:
         self.pico = pico
         self.lock = asyncio.Lock()
+        self.broadcast_lock = asyncio.Lock()
         self.last_pinstat_all: Optional[Dict[str, Any]] = None
         self.monitor_subscribers: Set[Any] = set()
+        self.background_tasks: Set[asyncio.Task] = set()
+        self.state_update_pending = False
+        self.state_update_task: Optional[asyncio.Task] = None
 
     def websocket_path(self, websocket: Any, path_hint: Optional[str] = None) -> str:
         """
@@ -380,36 +385,92 @@ class Gateway:
 
     async def broadcast_state_update(self) -> None:
         """Broadcast latest state snapshot to monitor subscribers only."""
+        async with self.broadcast_lock:
+            if not self.monitor_subscribers:
+                return
+
+            try:
+                await self.refresh_pinstat_all()
+            except Exception as exc:
+                log.warning("Broadcast refresh failed: %s", exc)
+                return
+
+            payload = {
+                "ok": 1,
+                "event": "pinstat_update",
+                "source": "gateway",
+                "data": self.last_pinstat_all,
+            }
+
+            subscribers = list(self.monitor_subscribers)
+
+            async def send_to_subscriber(ws: Any) -> Any:
+                try:
+                    ok = await asyncio.wait_for(
+                        safe_send_json(ws, payload),
+                        timeout=WS_BROADCAST_SEND_TIMEOUT,
+                    )
+                    return None if ok else ws
+                except asyncio.TimeoutError:
+                    log.warning(
+                        "Monitor send timed out: peer=%s timeout=%.1fs",
+                        peer_name(ws),
+                        WS_BROADCAST_SEND_TIMEOUT,
+                    )
+                    return ws
+                except Exception as exc:
+                    log.warning(
+                        "Monitor send failed: peer=%s error=%s",
+                        peer_name(ws),
+                        exc,
+                    )
+                    return ws
+
+            dead = await asyncio.gather(*(
+                send_to_subscriber(ws) for ws in subscribers
+            ))
+
+            for ws in dead:
+                if ws is not None:
+                    self.monitor_subscribers.discard(ws)
+
+            log.info(
+                "Broadcasted pinstat_update to %d monitor subscribers",
+                len(self.monitor_subscribers),
+            )
+
+    def schedule_state_update(self) -> None:
+        """Schedule a monitor update without delaying a control response."""
         if not self.monitor_subscribers:
             return
 
-        try:
-            await self.refresh_pinstat_all()
-        except Exception as exc:
-            log.warning("Broadcast refresh failed: %s", exc)
+        self.state_update_pending = True
+        if self.state_update_task is not None and not self.state_update_task.done():
             return
 
-        payload = {
-            "ok": 1,
-            "event": "pinstat_update",
-            "source": "gateway",
-            "data": self.last_pinstat_all,
-        }
+        task = asyncio.create_task(self.state_update_worker())
+        self.state_update_task = task
+        self.background_tasks.add(task)
+        task.add_done_callback(self.state_update_done)
 
-        dead = []
+    def state_update_done(self, task: asyncio.Task) -> None:
+        """Release a completed background update task and report failures."""
+        self.background_tasks.discard(task)
+        if self.state_update_task is task:
+            self.state_update_task = None
 
-        for ws in list(self.monitor_subscribers):
-            ok = await safe_send_json(ws, payload)
-            if not ok:
-                dead.append(ws)
+        if task.cancelled():
+            return
 
-        for ws in dead:
-            self.monitor_subscribers.discard(ws)
+        exc = task.exception()
+        if exc is not None:
+            log.error("State update task failed: %s", exc)
 
-        log.info(
-            "Broadcasted pinstat_update to %d monitor subscribers",
-            len(self.monitor_subscribers),
-        )
+    async def state_update_worker(self) -> None:
+        """Coalesce queued state changes into serialized monitor updates."""
+        while self.state_update_pending:
+            self.state_update_pending = False
+            await self.broadcast_state_update()
 
     async def subscribe_monitor(self, websocket: Any) -> Dict[str, Any]:
         """Register websocket as monitor subscriber and send current snapshot."""
@@ -509,7 +570,7 @@ class Gateway:
             and resp.get("ok") == 1
             and resp.get("cmd") in ("ON", "OFF", "ALLOFF")
         ):
-            await self.broadcast_state_update()
+            self.schedule_state_update()
 
         return resp
 
