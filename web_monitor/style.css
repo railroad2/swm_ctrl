@@ -14,10 +14,15 @@ html, body {
 
 .topbar {
     display: flex;
+    flex-wrap: wrap;
     justify-content: space-between;
     align-items: flex-start;
     gap: 24px;
     margin-bottom: 20px;
+}
+
+.topbar-title {
+    flex: 1 1 260px;
 }
 
 h1 {
@@ -40,9 +45,9 @@ h2 {
 }
 
 .status-panel,
+.measurement-panel,
 .toolbar-card,
 .matrix-card,
-.measurement-card,
 .active-card {
     background: #f3f6fa;
     border: 1px solid #bcc7d6;
@@ -51,7 +56,14 @@ h2 {
 }
 
 .status-panel {
+    flex: 0 1 280px;
     min-width: 280px;
+    padding: 14px 16px;
+}
+
+.measurement-panel {
+    flex: 0 1 300px;
+    min-width: 300px;
     padding: 14px 16px;
 }
 
@@ -205,11 +217,6 @@ h2 {
     padding: 18px 20px;
 }
 
-.measurement-card {
-    margin-bottom: 18px;
-    padding: 18px 20px;
-}
-
 .measurement-grid {
     display: grid;
     grid-template-columns: max-content minmax(0, 1fr);
@@ -276,8 +283,10 @@ h2 {
         flex-direction: column;
     }
 
-    .status-panel {
+    .status-panel,
+    .measurement-panel {
         width: 100%;
         min-width: 0;
+        box-sizing: border-box;
     }
 }
