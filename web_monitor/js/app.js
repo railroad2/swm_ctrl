@@ -10,9 +10,11 @@
     const refreshBtn = document.getElementById("refresh-btn");
     const measurementStatus = document.getElementById("measurement-status");
     const measurementType = document.getElementById("measurement-type");
+    const measurementMode = document.getElementById("measurement-mode");
     const measurementTarget = document.getElementById("measurement-target");
     const measurementProgressText = document.getElementById("measurement-progress-text");
     const measurementProgressBar = document.getElementById("measurement-progress-bar");
+    const measurementProgressPercent = document.getElementById("measurement-progress-percent");
 
     wsUri.textContent = config.wsUrl;
 
@@ -93,16 +95,18 @@
             measurementStatus.classList.add("measurement-failed");
         } else if (status === "completed") {
             measurementStatus.classList.add("measurement-completed");
-        } else if (status === "stopped") {
+        } else if (status === "stopped" || status === "idle") {
             measurementStatus.classList.add("measurement-idle");
         } else {
             measurementStatus.classList.add("measurement-active");
         }
 
-        measurementType.textContent = `${measurement.kind || "-"} · ${modeNames[measurement.mode] || "-"}`;
+        measurementType.textContent = measurement.kind || "-";
+        measurementMode.textContent = modeNames[measurement.mode] || "-";
         measurementTarget.textContent = targetLabel(measurement.mode, measurement.target);
         measurementProgressText.textContent = `${completed} / ${total}`;
         measurementProgressBar.style.width = `${percent}%`;
+        measurementProgressPercent.textContent = `${Math.round(percent)}%`;
     }
 
     const matrixView = new window.MatrixView(matrixRoot, {
