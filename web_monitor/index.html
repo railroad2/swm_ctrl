@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Switch Matrix Monitor</title>
-    <link rel="stylesheet" href="style.css?v=2">
+    <link rel="stylesheet" href="style.css?v=3">
 </head>
 <body>
     <main class="page">
@@ -14,39 +14,42 @@
                 <p class="subtitle">Real-time status monitor</p>
             </div>
 
-            <div class="status-panel">
-                <div class="status-row">
-                    <span class="status-label">Status</span>
-                    <span id="ws-state" class="badge disconnected">Disconnected</span>
+            <div class="topbar-panels">
+                <div class="status-panel">
+                    <h2>Switching matrix</h2>
+                    <div class="status-row">
+                        <span class="status-label">Status</span>
+                        <span id="ws-state" class="badge disconnected">Disconnected</span>
+                    </div>
+                    <div class="status-row">
+                        <span class="status-label">URI</span>
+                        <span id="ws-uri" class="value-text">-</span>
+                    </div>
+                    <div class="status-row">
+                        <span class="status-label">Event</span>
+                        <span id="event-state" class="value-text">-</span>
+                    </div>
+                    <div class="status-row">
+                        <span class="status-label">Active count</span>
+                        <span id="active-count" class="value-text">0</span>
+                    </div>
                 </div>
-                <div class="status-row">
-                    <span class="status-label">URI</span>
-                    <span id="ws-uri" class="value-text">-</span>
-                </div>
-                <div class="status-row">
-                    <span class="status-label">Event</span>
-                    <span id="event-state" class="value-text">-</span>
-                </div>
-                <div class="status-row">
-                    <span class="status-label">Active count</span>
-                    <span id="active-count" class="value-text">0</span>
-                </div>
-            </div>
 
-            <div class="measurement-card measurement-panel">
-                <h2>Measurement</h2>
-                <div class="measurement-grid">
-                    <span class="status-label">Status</span>
-                    <span id="measurement-status" class="badge measurement-idle">Idle</span>
-                    <span class="status-label">Type</span>
-                    <span id="measurement-type" class="value-text">-</span>
-                    <span class="status-label">Current target</span>
-                    <span id="measurement-target" class="value-text">-</span>
-                    <span class="status-label">Progress</span>
-                    <span id="measurement-progress-text" class="value-text">0 / 0</span>
-                </div>
-                <div class="measurement-progress" aria-label="Measurement target progress">
-                    <div id="measurement-progress-bar" class="measurement-progress-bar"></div>
+                <div class="measurement-card measurement-panel">
+                    <h2>Measurement</h2>
+                    <div class="measurement-grid">
+                        <span class="status-label">Status</span>
+                        <span id="measurement-status" class="badge measurement-idle">Idle</span>
+                        <span class="status-label">Type</span>
+                        <span id="measurement-type" class="value-text">-</span>
+                        <span class="status-label">Current target</span>
+                        <span id="measurement-target" class="value-text">-</span>
+                        <span class="status-label">Progress</span>
+                        <span id="measurement-progress-text" class="value-text">0 / 0</span>
+                    </div>
+                    <div class="measurement-progress" aria-label="Measurement target progress">
+                        <div id="measurement-progress-bar" class="measurement-progress-bar"></div>
+                    </div>
                 </div>
             </div>
         </header>

@@ -25,6 +25,15 @@ html, body {
     flex: 1 1 260px;
 }
 
+.topbar-panels {
+    display: flex;
+    flex: 0 1 auto;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    align-items: stretch;
+    gap: 24px;
+}
+
 h1 {
     margin: 0;
     font-size: 28px;
@@ -281,6 +290,11 @@ h2 {
 
 @media (max-width: 720px) {
     .topbar {
+        flex-direction: column;
+    }
+
+    .topbar-panels {
+        width: 100%;
         flex-direction: column;
     }
 
