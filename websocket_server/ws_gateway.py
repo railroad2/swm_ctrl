@@ -16,8 +16,10 @@ Features
 """
 
 import asyncio
+import ipaddress
 import json
 import logging
+import os
 import threading
 import time
 from typing import Any, Dict, Optional, Set
@@ -42,7 +44,21 @@ UART_STARTUP_SETTLE = 0.02
 UART_DRAIN_DURATION = 0.01
 
 WS_HOST = "0.0.0.0"
-WS_PORT = 8765
+WS_CONTROL_PORT = 8765
+WS_MONITOR_PORT = 8766
+
+# Comma-separated IPv4/IPv6 addresses or CIDR networks allowed to use
+# /control. When unset, only clients on this Raspberry Pi are allowed.
+# Example:
+#   CONTROL_ALLOWED_NETWORKS="192.168.0.50/32,192.168.0.64/26"
+CONTROL_ALLOWED_NETWORKS = tuple(
+    ipaddress.ip_network(item.strip(), strict=False)
+    for item in os.environ.get(
+        "CONTROL_ALLOWED_NETWORKS",
+        "127.0.0.1/32",
+    ).split(",")
+    if item.strip()
+)
 
 LOG_LEVEL = logging.INFO
 
@@ -92,6 +108,38 @@ def peer_name(websocket: Any) -> str:
         return str(websocket.remote_address)
     except Exception:
         return "<unknown>"
+
+
+def websocket_client_ip(websocket: Any) -> Optional[Any]:
+    """Return the normalized WebSocket client IP address, if available."""
+    try:
+        remote = websocket.remote_address
+        if not isinstance(remote, tuple) or not remote:
+            return None
+
+        address_text = str(remote[0]).split("%", 1)[0]
+        address = ipaddress.ip_address(address_text)
+
+        # Normalize IPv4-mapped IPv6 addresses such as ::ffff:192.168.0.50.
+        if isinstance(address, ipaddress.IPv6Address):
+            if address.ipv4_mapped is not None:
+                return address.ipv4_mapped
+
+        return address
+    except (AttributeError, TypeError, ValueError):
+        return None
+
+
+def control_ip_allowed(websocket: Any) -> bool:
+    """Return whether this WebSocket peer may access /control."""
+    address = websocket_client_ip(websocket)
+    if address is None:
+        return False
+
+    return any(
+        address.version == network.version and address in network
+        for network in CONTROL_ALLOWED_NETWORKS
+    )
 
 
 async def safe_send_json(websocket: Any, payload: Dict[str, Any]) -> bool:
@@ -465,6 +513,21 @@ class Gateway:
 
         log.info("Client connected: %s path=%s", name, norm_path)
 
+        if norm_path == "/control" and not control_ip_allowed(websocket):
+            client_ip = websocket_client_ip(websocket)
+            log.warning(
+                "Control access denied: ip=%s peer=%s",
+                client_ip if client_ip is not None else "<unknown>",
+                name,
+            )
+
+            await safe_send_json(websocket, json_error(
+                "control access denied",
+                path="/control",
+            ))
+            await websocket.close(code=1008, reason="control access denied")
+            return
+
         try:
             ok = await safe_send_json(websocket, {
                 "ok": 1,
@@ -533,16 +596,23 @@ async def main() -> None:
 
     gateway = Gateway(pico)
 
-    async with websockets.serve(
-        gateway.handle,
-        WS_HOST,
-        WS_PORT,
+    async def control_handler(websocket: Any, path: Optional[str] = None) -> None:
+        # Port 8765 is always control, regardless of the requested URL path.
+        await gateway.handle(websocket, "/control")
+
+    async def monitor_handler(websocket: Any, path: Optional[str] = None) -> None:
+        # Port 8766 is always monitor, regardless of the requested URL path.
+        await gateway.handle(websocket, "/monitor")
+
+    async with (
+        websockets.serve(control_handler, WS_HOST, WS_CONTROL_PORT),
+        websockets.serve(monitor_handler, WS_HOST, WS_MONITOR_PORT)
     ):
-        log.info("WebSocket gateway running on ws://%s:%d", WS_HOST, WS_PORT)
-        log.info("Monitor endpoint: ws://%s:%d/monitor", WS_HOST, WS_PORT)
-        log.info("Control endpoint: ws://%s:%d/control", WS_HOST, WS_PORT)
+        log.info("Control WebSocket running on ws://%s:%d", WS_HOST, WS_CONTROL_PORT)
+        log.info("Monitor WebSocket running on ws://%s:%d", WS_HOST, WS_MONITOR_PORT)
         await asyncio.Future()
 
 
 if __name__ == "__main__":
     asyncio.run(main())
+

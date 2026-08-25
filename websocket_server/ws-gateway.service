@@ -13,7 +13,8 @@ Restart=always
 RestartSec=2
 
 # Environment tuning
-Environment=PYTHONUNBUFFERED=1
+Environment="PYTHONUNBUFFERED=1"
+Environment="CONTROL_ALLOWED_NETWORKS=127.0.0.1/32,192.168.0.0/24"
 
 # Journal logging
 StandardOutput=journal

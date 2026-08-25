@@ -5,6 +5,11 @@ test_ws.py
 
 Protocol test client for the split WebSocket gateway.
 
+Current gateway layout
+----------------------
+- Control: ws://HOST:8765 (source-IP restricted)
+- Monitor: ws://HOST:8766 (public/read-only)
+
 Default behavior
 ----------------
 - Run the full core test suite
@@ -142,13 +147,12 @@ async def open_ws(uri: str):
     return ws, hello
 
 
-async def test_monitor_basic(base_uri: str) -> TestResult:
+async def test_monitor_basic(monitor_uri: str) -> TestResult:
     """Test basic /monitor commands."""
     name = "monitor-basic"
-    uri = base_uri.rstrip("/") + "/monitor"
 
     try:
-        ws, hello = await open_ws(uri)
+        ws, hello = await open_ws(monitor_uri)
 
         try:
             if hello.get("event") != "connected":
@@ -196,13 +200,12 @@ async def test_monitor_basic(base_uri: str) -> TestResult:
         return TestResult(name, False, str(exc))
 
 
-async def test_monitor_reject_control(base_uri: str) -> TestResult:
+async def test_monitor_reject_control(monitor_uri: str) -> TestResult:
     """Verify /monitor rejects control command."""
     name = "monitor-reject-control"
-    uri = base_uri.rstrip("/") + "/monitor"
 
     try:
-        ws, _ = await open_ws(uri)
+        ws, _ = await open_ws(monitor_uri)
 
         try:
             await send_json(ws, {"cmd": "ON", "pins": [0]})
@@ -220,13 +223,12 @@ async def test_monitor_reject_control(base_uri: str) -> TestResult:
         return TestResult(name, False, str(exc))
 
 
-async def test_control_basic(base_uri: str) -> TestResult:
+async def test_control_basic(control_uri: str) -> TestResult:
     """Test basic /control commands."""
     name = "control-basic"
-    uri = base_uri.rstrip("/") + "/control"
 
     try:
-        ws, hello = await open_ws(uri)
+        ws, hello = await open_ws(control_uri)
 
         try:
             if hello.get("event") != "connected":
@@ -260,13 +262,12 @@ async def test_control_basic(base_uri: str) -> TestResult:
         return TestResult(name, False, str(exc))
 
 
-async def test_control_reject_gateway(base_uri: str) -> TestResult:
+async def test_control_reject_gateway(control_uri: str) -> TestResult:
     """Verify /control rejects gateway command."""
     name = "control-reject-gateway"
-    uri = base_uri.rstrip("/") + "/control"
 
     try:
-        ws, _ = await open_ws(uri)
+        ws, _ = await open_ws(control_uri)
 
         try:
             await send_json(ws, {"gateway": "subscribe"})
@@ -284,15 +285,17 @@ async def test_control_reject_gateway(base_uri: str) -> TestResult:
         return TestResult(name, False, str(exc))
 
 
-async def test_event_flow(base_uri: str, pin: int) -> TestResult:
+async def test_event_flow(
+    control_uri: str,
+    monitor_uri: str,
+    pin: int,
+) -> TestResult:
     """Verify ON/OFF on /control produces monitor updates on /monitor."""
     name = "event-flow"
-    mon_uri = base_uri.rstrip("/") + "/monitor"
-    ctl_uri = base_uri.rstrip("/") + "/control"
 
     try:
-        mon_ws, _ = await open_ws(mon_uri)
-        ctl_ws, _ = await open_ws(ctl_uri)
+        mon_ws, _ = await open_ws(monitor_uri)
+        ctl_ws, _ = await open_ws(control_uri)
 
         try:
             await send_json(mon_ws, {"gateway": "subscribe"})
@@ -332,13 +335,12 @@ async def test_event_flow(base_uri: str, pin: int) -> TestResult:
         return TestResult(name, False, str(exc))
 
 
-async def test_alloff(base_uri: str) -> TestResult:
+async def test_alloff(control_uri: str) -> TestResult:
     """Verify ALLOFF works on /control."""
     name = "alloff"
-    uri = base_uri.rstrip("/") + "/control"
 
     try:
-        ws, _ = await open_ws(uri)
+        ws, _ = await open_ws(control_uri)
 
         try:
             await send_json(ws, {"cmd": "ALLOFF"})
@@ -356,18 +358,57 @@ async def test_alloff(base_uri: str) -> TestResult:
         return TestResult(name, False, str(exc))
 
 
-async def run_default_suite(base_uri: str, pin: int) -> List[TestResult]:
+async def run_default_suite(
+    control_uri: str,
+    monitor_uri: str,
+    pin: int,
+) -> List[TestResult]:
     """Run the full default test suite."""
     results = []
 
-    results.append(await test_monitor_basic(base_uri))
-    results.append(await test_monitor_reject_control(base_uri))
-    results.append(await test_control_basic(base_uri))
-    results.append(await test_control_reject_gateway(base_uri))
-    results.append(await test_event_flow(base_uri, pin))
-    results.append(await test_alloff(base_uri))
+    results.append(await test_monitor_basic(monitor_uri))
+    results.append(await test_monitor_reject_control(monitor_uri))
+    results.append(await test_control_basic(control_uri))
+    results.append(await test_control_reject_gateway(control_uri))
+    results.append(await test_event_flow(control_uri, monitor_uri, pin))
+    results.append(await test_alloff(control_uri))
 
     return results
+
+
+async def run_monitor_suite(monitor_uri: str) -> List[TestResult]:
+    """Run tests that require only the public monitor port."""
+    return [
+        await test_monitor_basic(monitor_uri),
+        await test_monitor_reject_control(monitor_uri),
+    ]
+
+
+async def test_control_denied(control_uri: str) -> TestResult:
+    """Verify that this client's IP is denied by the control port."""
+    name = "control-ip-denied"
+
+    try:
+        ws = await websockets.connect(control_uri)
+
+        try:
+            resp = await recv_json(ws)
+            if (
+                resp.get("ok") == 0
+                and resp.get("error") == "control access denied"
+            ):
+                return TestResult(name, True, "control IP restriction active")
+
+            return TestResult(
+                name,
+                False,
+                f"unexpected first response: {summarize(resp)}",
+            )
+        finally:
+            await ws.close()
+
+    except Exception as exc:
+        return TestResult(name, False, str(exc))
 
 
 def print_result(result: TestResult) -> None:
@@ -398,12 +439,10 @@ def print_summary(results: List[TestResult]) -> int:
     return 0
 
 
-async def follow_monitor(base_uri: str) -> int:
+async def follow_monitor(monitor_uri: str) -> int:
     """Subscribe and print monitor events forever."""
-    uri = base_uri.rstrip("/") + "/monitor"
-
     try:
-        ws, hello = await open_ws(uri)
+        ws, hello = await open_ws(monitor_uri)
 
         if hello.get("event") != "connected":
             print("FAIL  follow: missing connected hello")
@@ -447,9 +486,33 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument(
-        "--base-uri",
-        default="ws://127.0.0.1:8765",
-        help="base websocket URI without endpoint suffix",
+        "--host",
+        default="127.0.0.1",
+        help="gateway host used to build default WebSocket URIs",
+    )
+
+    parser.add_argument(
+        "--control-port",
+        type=int,
+        default=8765,
+        help="control WebSocket port (default: 8765)",
+    )
+
+    parser.add_argument(
+        "--monitor-port",
+        type=int,
+        default=8766,
+        help="monitor WebSocket port (default: 8766)",
+    )
+
+    parser.add_argument(
+        "--control-uri",
+        help="complete control WebSocket URI; overrides --host/--control-port",
+    )
+
+    parser.add_argument(
+        "--monitor-uri",
+        help="complete monitor WebSocket URI; overrides --host/--monitor-port",
     )
 
     parser.add_argument(
@@ -465,13 +528,32 @@ def build_parser() -> argparse.ArgumentParser:
         help="print full JSON I/O",
     )
 
-    parser.add_argument(
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
         "--follow",
         action="store_true",
         help="follow monitor events instead of running the default full test suite",
     )
 
+    mode.add_argument(
+        "--monitor-only",
+        action="store_true",
+        help="run only tests for the publicly accessible monitor port",
+    )
+    mode.add_argument(
+        "--expect-control-denied",
+        action="store_true",
+        help="verify that this client's IP is rejected by the control port",
+    )
+
     return parser
+
+
+def websocket_host(host: str) -> str:
+    """Wrap a bare IPv6 address for use in a WebSocket URI."""
+    if ":" in host and not host.startswith("["):
+        return f"[{host}]"
+    return host
 
 
 async def async_main() -> int:
@@ -482,11 +564,26 @@ async def async_main() -> int:
     args = parser.parse_args()
     VERBOSE = args.verbose
 
-    if args.follow:
-        return await follow_monitor(args.base_uri)
+    host = websocket_host(args.host)
+    control_uri = args.control_uri or f"ws://{host}:{args.control_port}"
+    monitor_uri = args.monitor_uri or f"ws://{host}:{args.monitor_port}"
 
-    print("Running full WebSocket protocol test suite...\n")
-    results = await run_default_suite(args.base_uri, args.pin)
+    if args.follow:
+        return await follow_monitor(monitor_uri)
+
+    if args.expect_control_denied:
+        result = await test_control_denied(control_uri)
+        print_result(result)
+        return print_summary([result])
+
+    if args.monitor_only:
+        print("Running monitor-only WebSocket tests...\n")
+        results = await run_monitor_suite(monitor_uri)
+    else:
+        print("Running full WebSocket protocol test suite...")
+        print(f"  control: {control_uri}")
+        print(f"  monitor: {monitor_uri}\n")
+        results = await run_default_suite(control_uri, monitor_uri, args.pin)
 
     print()
     for result in results:
@@ -508,3 +605,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
