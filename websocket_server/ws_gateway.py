@@ -64,6 +64,7 @@ UART_COMMAND_TIMEOUT = 3.0
 UART_STARTUP_SETTLE = 0.02
 UART_DRAIN_DURATION = 0.01
 WS_BROADCAST_SEND_TIMEOUT = 1.0
+MEASUREMENT_IDLE_DELAY = 60.0
 
 WS_HOST = "0.0.0.0"
 WS_CONTROL_PORT = 8765
@@ -232,7 +233,12 @@ async def safe_send_json(websocket: Any, payload: Dict[str, Any]) -> bool:
 class Gateway:
     """Async WebSocket gateway around the persistent Pico UART client."""
 
-    def __init__(self, pico: PicoUARTClient) -> None:
+    def __init__(
+        self,
+        pico: PicoUARTClient,
+        *,
+        measurement_idle_delay: float = MEASUREMENT_IDLE_DELAY,
+    ) -> None:
         self.pico = pico
         self.lock = asyncio.Lock()
         self.broadcast_lock = asyncio.Lock()
@@ -244,6 +250,8 @@ class Gateway:
         self.measurement_status: Optional[Dict[str, Any]] = None
         self.measurement_update_pending = False
         self.measurement_update_task: Optional[asyncio.Task] = None
+        self.measurement_idle_delay = measurement_idle_delay
+        self.measurement_idle_task: Optional[asyncio.Task] = None
 
     def websocket_path(self, websocket: Any, path_hint: Optional[str] = None) -> str:
         """
@@ -489,6 +497,51 @@ class Gateway:
                     "measurement": dict(measurement),
                 })
 
+    def schedule_measurement_idle(self, terminal_measurement: Dict[str, Any]) -> None:
+        """Return a terminal measurement state to idle after the hold time."""
+        task = self.measurement_idle_task
+        if task is not None and not task.done():
+            task.cancel()
+
+        task = asyncio.create_task(
+            self.measurement_idle_worker(terminal_measurement)
+        )
+        self.measurement_idle_task = task
+        self.background_tasks.add(task)
+        task.add_done_callback(self.measurement_idle_done)
+
+    def cancel_measurement_idle(self) -> None:
+        """Cancel a pending idle transition when a new status arrives."""
+        task = self.measurement_idle_task
+        if task is not None and not task.done():
+            task.cancel()
+        self.measurement_idle_task = None
+
+    def measurement_idle_done(self, task: asyncio.Task) -> None:
+        self.background_tasks.discard(task)
+        if self.measurement_idle_task is task:
+            self.measurement_idle_task = None
+        if not task.cancelled() and task.exception() is not None:
+            log.error("Measurement idle transition failed: %s", task.exception())
+
+    async def measurement_idle_worker(
+        self,
+        terminal_measurement: Dict[str, Any],
+    ) -> None:
+        await asyncio.sleep(self.measurement_idle_delay)
+        if self.measurement_status is not terminal_measurement:
+            return
+
+        self.measurement_status = {
+            "status": "idle",
+            "kind": None,
+            "mode": None,
+            "target": None,
+            "completed": 0,
+            "total": 0,
+        }
+        self.schedule_measurement_update()
+
     async def subscribe_monitor(self, websocket: Any) -> Dict[str, Any]:
         """Register websocket as monitor subscriber and send current snapshot."""
         self.monitor_subscribers.add(websocket)
@@ -578,7 +631,10 @@ class Gateway:
                     return json_error(str(exc), path="/control")
 
                 self.measurement_status = measurement
+                self.cancel_measurement_idle()
                 self.schedule_measurement_update()
+                if measurement["status"] in ("stopped", "completed", "failed"):
+                    self.schedule_measurement_idle(measurement)
                 return {
                     "ok": 1,
                     "event": "measurement_status",

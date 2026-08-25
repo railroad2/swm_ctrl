@@ -87,6 +87,59 @@ class MeasurementStatusGatewayTests(unittest.IsolatedAsyncioTestCase):
         snapshot = await gateway.gateway_get()
         self.assertEqual(snapshot["measurement"], gateway.measurement_status)
 
+    async def test_terminal_status_returns_to_idle_after_delay(self):
+        gateway = Gateway(FakePico(), measurement_idle_delay=0.01)
+        monitor = FakeWebSocket()
+        gateway.monitor_subscribers.add(monitor)
+
+        await gateway.handle_control({
+            "gateway": "measurement",
+            "status": "stopped",
+            "kind": "IV",
+            "mode": "channel",
+            "target": 7,
+            "completed": 2,
+            "total": 4,
+        })
+        await asyncio.sleep(0.02)
+        if gateway.background_tasks:
+            await asyncio.gather(*gateway.background_tasks)
+
+        self.assertEqual(gateway.measurement_status["status"], "idle")
+        self.assertEqual(gateway.measurement_status["completed"], 0)
+        self.assertEqual(gateway.measurement_status["total"], 0)
+        self.assertEqual(monitor.messages[-1]["event"], "measurement_update")
+        self.assertEqual(
+            monitor.messages[-1]["measurement"]["status"],
+            "idle",
+        )
+
+    async def test_new_measurement_cancels_pending_idle_transition(self):
+        gateway = Gateway(FakePico(), measurement_idle_delay=0.01)
+
+        await gateway.handle_control({
+            "gateway": "measurement",
+            "status": "completed",
+            "kind": "CV",
+            "mode": "row",
+            "target": 3,
+            "completed": 1,
+            "total": 1,
+        })
+        await gateway.handle_control({
+            "gateway": "measurement",
+            "status": "starting",
+            "kind": "IV",
+            "mode": "column",
+            "target": None,
+            "completed": 0,
+            "total": 2,
+        })
+        await asyncio.sleep(0.02)
+
+        self.assertEqual(gateway.measurement_status["status"], "starting")
+        self.assertEqual(gateway.measurement_status["kind"], "IV")
+
 
 if __name__ == "__main__":
     unittest.main()
