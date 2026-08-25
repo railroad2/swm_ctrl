@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 """
-test_ws.py
+test_websocket_client.py
 
 WebSocket client-side protocol test for the split gateway.
 
