@@ -1,9 +1,12 @@
 #!/bin/bash
 
-input="UPLOADLIST"
+set -euo pipefail
 
-while IFS= read -r line; do 
-    [[ -z "$line" ]] && continue
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+upload_list="$script_dir/UPLOADLIST"
 
-    mpremote cp ./$line :
-done < "$input"
+while IFS= read -r filename; do
+    [[ -z "$filename" ]] && continue
+
+    mpremote cp "$script_dir/$filename" :
+done < "$upload_list"
