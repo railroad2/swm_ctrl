@@ -24,7 +24,7 @@ def print_pins_all(pins: List[int], highlights: Optional[List[int]], frame: bool
     if len(pins) != 256:
         raise ValueError("ALL mode requires 256 pins")
 
-    cell_width = 3
+    cell_width = 2
     header_cells = [" " * cell_width]
     for col in range(16):
         header_cells.append(f"{col:>{cell_width}d}")

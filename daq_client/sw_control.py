@@ -95,7 +95,7 @@ def print_matrix(pins: List[int], color: bool = True, frame: bool = True) -> Non
         print(f"invalid pin array length: {len(pins)}")
         return
 
-    cell_w = 3
+    cell_w = 2
 
     header_cells = [" " * cell_w]
     for col in range(16):
