@@ -13,7 +13,7 @@ def colorize(text: str, enabled: bool, state: int, highlight: bool) -> str:
         return text
     if highlight:
         return f"\033[1;42;30m{text}\033[0m" if state else f"\033[1;41;37m{text}\033[0m"
-    return f"\033[32m{text}\033[0m" if state else f"\033[90m{text}\033[0m"
+    return f"\033[1;32m{text}\033[0m" if state else f"\033[90m{text}\033[0m"
 
 
 def print_frame_line(width: int) -> None:
@@ -23,21 +23,36 @@ def print_frame_line(width: int) -> None:
 def print_pins_all(pins: List[int], highlights: Optional[List[int]], frame: bool, color: bool) -> None:
     if len(pins) != 256:
         raise ValueError("ALL mode requires 256 pins")
-    width = 4 + 16 * 2 - 1
+
+    cell_width = 3
+    header_cells = [" " * cell_width]
+    for col in range(16):
+        header_cells.append(f"{col:>{cell_width}d}")
+    header = " ".join(header_cells)
+
     if frame:
-        print_frame_line(width)
+        print_frame_line(len(header) + 2)
+        print("| " + header + " |")
+        print("|-" + "-" * len(header) + "-|")
+    else:
+        print(header)
+
     for row in range(16):
-        base = row * 16
-        cells = []
+        row_letter = chr(ord("A") + row)
+        cells = [f"{row_letter:>{cell_width}s}"]
+
         for col in range(16):
-            channel = base + col
+            channel = row * 16 + col
             state = pins[channel]
             highlighted = highlights is not None and channel in highlights
-            cells.append(colorize(str(state), color, state, highlighted))
-        line = f"{base:03d}: " + " ".join(cells)
-        print(f"|{line}|" if frame else line)
+            text = f"{state:>{cell_width}d}"
+            cells.append(colorize(text, color, state, highlighted))
+
+        line = " ".join(cells)
+        print(f"| {line} |" if frame else line)
+
     if frame:
-        print_frame_line(width)
+        print_frame_line(len(header) + 2)
 
 
 def print_pins_pcf(pcf_id: int, pins: List[int], highlights: Optional[List[int]], frame: bool, color: bool) -> None:
