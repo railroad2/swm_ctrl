@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 """
-sw.py
+sw_uart.py
 
 Command line interface for the 256-channel switching matrix controller.
 
