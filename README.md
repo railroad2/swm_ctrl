@@ -199,3 +199,7 @@ After debugging, restart the gateway service:
 ```bash
 sudo systemctl start ws-gateway
 ```
+
+## Acknowledgements
+
+Development of this project was assisted by OpenAI Codex.
