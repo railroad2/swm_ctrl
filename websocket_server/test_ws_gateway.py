@@ -2,7 +2,11 @@ import asyncio
 import json
 import unittest
 
-from swm_ctrl.websocket_server.ws_gateway import Gateway, parse_measurement_status
+from swm_ctrl.websocket_server.ws_gateway import (
+    Gateway,
+    WS_CONTROL_PING_INTERVAL,
+    parse_measurement_status,
+)
 
 
 class FakePico:
@@ -18,6 +22,9 @@ class FakeWebSocket:
 
 
 class MeasurementStatusValidationTests(unittest.TestCase):
+    def test_control_server_keepalive_is_disabled_for_blocking_sweeps(self):
+        self.assertIsNone(WS_CONTROL_PING_INTERVAL)
+
     def test_accepts_target_progress_without_sweep_fields(self):
         status = parse_measurement_status({
             "status": "running",

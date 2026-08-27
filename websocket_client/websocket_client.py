@@ -193,10 +193,12 @@ class WebSocketClient:
         *,
         timeout: float = 5.0,
         connect_timeout: float = 5.0,
+        ping_interval: Optional[float] = 20.0,
     ) -> None:
         self.uri = uri
         self.timeout = timeout
         self.connect_timeout = connect_timeout
+        self.ping_interval = ping_interval
 
         self._ws = None
         self._lock = asyncio.Lock()
@@ -212,7 +214,10 @@ class WebSocketClient:
 
         try:
             self._ws = await asyncio.wait_for(
-                websockets.connect(self.uri),
+                websockets.connect(
+                    self.uri,
+                    ping_interval=self.ping_interval,
+                ),
                 timeout=self.connect_timeout,
             )
         except Exception as exc:

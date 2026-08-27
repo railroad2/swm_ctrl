@@ -42,10 +42,15 @@ class WebSocketClientSync:
         *,
         timeout: float = 5.0,
         connect_timeout: float = 5.0,
+        ping_interval: Optional[float] = None,
     ) -> None:
         self.uri = uri
         self.timeout = timeout
         self.connect_timeout = connect_timeout
+        # The sync wrapper's event loop runs only while a command is active.
+        # Disable automatic keepalive by default so long instrument sweeps do
+        # not look like a stalled event loop and close a healthy connection.
+        self.ping_interval = ping_interval
 
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._client: Optional[WebSocketClient] = None
@@ -73,6 +78,7 @@ class WebSocketClientSync:
                 self.uri,
                 timeout=self.timeout,
                 connect_timeout=self.connect_timeout,
+                ping_interval=self.ping_interval,
             )
         return self._client
 

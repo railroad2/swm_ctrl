@@ -69,6 +69,7 @@ MEASUREMENT_IDLE_DELAY = 60.0
 WS_HOST = "0.0.0.0"
 WS_CONTROL_PORT = 8765
 WS_MONITOR_PORT = 8766
+WS_CONTROL_PING_INTERVAL = None
 
 # Comma-separated IPv4/IPv6 addresses or CIDR networks allowed to use
 # /control. When unset, only clients on this Raspberry Pi are allowed.
@@ -773,7 +774,15 @@ async def main() -> None:
 
     try:
         async with (
-            websockets.serve(control_handler, WS_HOST, WS_CONTROL_PORT),
+            # Control clients may spend minutes in a blocking instrument
+            # sweep.  They cannot service WebSocket keepalive frames during
+            # that time, so command traffic provides the liveness check.
+            websockets.serve(
+                control_handler,
+                WS_HOST,
+                WS_CONTROL_PORT,
+                ping_interval=WS_CONTROL_PING_INTERVAL,
+            ),
             websockets.serve(monitor_handler, WS_HOST, WS_MONITOR_PORT)
         ):
             log.info("Control WebSocket running on ws://%s:%d", WS_HOST, WS_CONTROL_PORT)
