@@ -71,6 +71,13 @@ WS_CONTROL_PORT = 8765
 WS_MONITOR_PORT = 8766
 WS_CONTROL_PING_INTERVAL = None
 
+MPREMOTE_EXECUTABLE = os.environ.get("MPREMOTE_EXECUTABLE", "mpremote")
+MPREMOTE_RESET_TIMEOUT = 10.0
+RESET_BOOT_DELAY = 0.5
+RESET_VERIFY_ATTEMPTS = 5
+RESET_VERIFY_INTERVAL = 0.25
+RESET_PICO_COMMAND_TIMEOUT = 1.0
+
 # Comma-separated IPv4/IPv6 addresses or CIDR networks allowed to use
 # /control. When unset, only clients on this Raspberry Pi are allowed.
 # Example:
@@ -101,6 +108,53 @@ log = logging.getLogger("ws_gateway")
 # ---------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------
+
+class ResetVerificationError(RuntimeError):
+    """Raised after mpremote succeeds but Pico recovery cannot be verified."""
+
+
+async def run_mpremote_reset(
+    executable: str = MPREMOTE_EXECUTABLE,
+    timeout: float = MPREMOTE_RESET_TIMEOUT,
+) -> None:
+    """Run the fixed ``mpremote reset`` command without invoking a shell."""
+    try:
+        process = await asyncio.create_subprocess_exec(
+            executable,
+            "reset",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except OSError as exc:
+        raise RuntimeError(f"failed to start {executable!r}: {exc}") from exc
+
+    try:
+        stdout, stderr = await asyncio.wait_for(
+            process.communicate(),
+            timeout=timeout,
+        )
+    except asyncio.TimeoutError as exc:
+        if process.returncode is None:
+            process.kill()
+        await process.communicate()
+        raise RuntimeError(
+            f"mpremote reset timed out after {timeout:g} seconds"
+        ) from exc
+
+    stdout_text = stdout.decode("utf-8", errors="replace").strip()
+    stderr_text = stderr.decode("utf-8", errors="replace").strip()
+    if process.returncode != 0:
+        detail = stderr_text or stdout_text or "no output"
+        raise RuntimeError(
+            f"mpremote reset failed with exit code {process.returncode}: "
+            f"{detail}"
+        )
+
+    if stdout_text:
+        log.info("mpremote reset: %s", stdout_text)
+    if stderr_text:
+        log.info("mpremote reset stderr: %s", stderr_text)
+
 
 def json_error(msg: str, **extra: Any) -> Dict[str, Any]:
     """Build a gateway-side JSON error response."""
@@ -319,6 +373,98 @@ class Gateway:
                 self.last_pinstat_all = resp
 
             return resp
+
+    async def reset_pico(self) -> Dict[str, Any]:
+        """Run mpremote reset and verify the Pico is serving UART commands."""
+        self.last_pinstat_all = None
+
+        async with self.lock:
+            await run_mpremote_reset()
+            log.info("mpremote reset completed; waiting for Pico startup")
+            await asyncio.sleep(RESET_BOOT_DELAY)
+
+            last_error: Any = "Pico did not respond"
+            for attempt in range(1, RESET_VERIFY_ATTEMPTS + 1):
+                try:
+                    ping = await asyncio.to_thread(
+                        self.pico.send_command,
+                        {"cmd": "PING"},
+                        timeout=RESET_PICO_COMMAND_TIMEOUT,
+                        resync_before_send=True,
+                    )
+                    ping.pop(UART_REQUEST_ID_FIELD, None)
+                    if not (
+                        ping.get("ok") == 1
+                        and ping.get("cmd") == "PING"
+                        and ping.get("pong") == 1
+                    ):
+                        raise PicoClientError(
+                            f"unexpected PING response after reset: {ping}"
+                        )
+
+                    pinstat = await asyncio.to_thread(
+                        self.pico.send_command,
+                        {"cmd": "PINSTAT", "which": "ALL"},
+                        timeout=RESET_PICO_COMMAND_TIMEOUT,
+                    )
+                    pinstat.pop(UART_REQUEST_ID_FIELD, None)
+                    pins = pinstat.get("pins")
+                    if not (
+                        pinstat.get("ok") == 1
+                        and pinstat.get("cmd") == "PINSTAT"
+                        and pinstat.get("which") == "ALL"
+                        and isinstance(pins, list)
+                        and len(pins) == 256
+                    ):
+                        raise PicoClientError(
+                            f"unexpected PINSTAT response after reset: {pinstat}"
+                        )
+
+                    self.last_pinstat_all = pinstat
+                    log.info("Pico restart verified on attempt %d", attempt)
+                    return {
+                        "ok": 1,
+                        "event": "reset",
+                        "source": "gateway",
+                        "reset_executed": 1,
+                        "restarted": 1,
+                    }
+                except PicoTransportError as exc:
+                    last_error = exc
+                    log.warning(
+                        "Pico reset verification transport failure "
+                        "(attempt %d/%d): %s",
+                        attempt,
+                        RESET_VERIFY_ATTEMPTS,
+                        exc,
+                    )
+                    try:
+                        await asyncio.to_thread(self.pico.reopen)
+                    except PicoClientError as reopen_exc:
+                        last_error = reopen_exc
+                        log.warning("UART reopen after reset failed: %s", reopen_exc)
+                except PicoClientError as exc:
+                    last_error = exc
+                    log.warning(
+                        "Pico reset verification failed (attempt %d/%d): %s",
+                        attempt,
+                        RESET_VERIFY_ATTEMPTS,
+                        exc,
+                    )
+                except Exception as exc:
+                    last_error = exc
+                    log.warning(
+                        "Unexpected reset verification failure "
+                        "(attempt %d/%d): %s",
+                        attempt,
+                        RESET_VERIFY_ATTEMPTS,
+                        exc,
+                    )
+
+                if attempt < RESET_VERIFY_ATTEMPTS:
+                    await asyncio.sleep(RESET_VERIFY_INTERVAL)
+
+        raise ResetVerificationError(str(last_error))
 
     async def refresh_pinstat_all(self) -> Dict[str, Any]:
         """Query PINSTAT ALL from Pico and update cache."""
@@ -625,7 +771,33 @@ class Gateway:
     async def handle_control(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Handle control-only commands."""
         if "gateway" in payload:
-            if payload.get("gateway") == "measurement":
+            gateway_cmd = payload.get("gateway")
+            if gateway_cmd == "reset":
+                try:
+                    response = await self.reset_pico()
+                except ResetVerificationError as exc:
+                    log.error("Pico reset could not be verified: %s", exc)
+                    return json_error(
+                        str(exc),
+                        path="/control",
+                        event="reset",
+                        reset_executed=1,
+                        restarted=0,
+                    )
+                except Exception as exc:
+                    log.error("Pico reset command failed: %s", exc)
+                    return json_error(
+                        str(exc),
+                        path="/control",
+                        event="reset",
+                        reset_executed=0,
+                        restarted=0,
+                    )
+
+                self.schedule_state_update()
+                return response
+
+            if gateway_cmd == "measurement":
                 try:
                     measurement = parse_measurement_status(payload)
                 except ValueError as exc:
