@@ -276,13 +276,19 @@ class WebSocketClient:
 
         return obj
 
-    async def _send_and_recv(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+    async def _send_and_recv(
+        self,
+        payload: Dict[str, Any],
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
         """
         Send one JSON object and receive one JSON object.
 
-        Access is serialized with an async lock.
+        Access is serialized with an async lock. ``timeout`` overrides the
+        normal request timeout for operations such as a controller reset.
         """
         ws = self._require_ws()
+        request_timeout = self.timeout if timeout is None else timeout
 
         async with self._lock:
             try:
@@ -291,11 +297,11 @@ class WebSocketClient:
                 raise WebSocketProtocolError(f"failed to serialize payload: {exc}") from exc
 
             try:
-                await asyncio.wait_for(ws.send(msg), timeout=self.timeout)
+                await asyncio.wait_for(ws.send(msg), timeout=request_timeout)
             except Exception as exc:
                 raise WebSocketTransportError(f"failed to send to gateway: {exc}") from exc
 
-            resp = await self._recv_json(timeout=self.timeout)
+            resp = await self._recv_json(timeout=request_timeout)
             return resp
 
     async def _send_pico_command(self, payload: Dict[str, Any], expected_cmd: str) -> Dict[str, Any]:
@@ -323,6 +329,22 @@ class WebSocketClient:
         if resp.get("ok") != 1 or resp.get("event") != "gateway_pong":
             raise WebSocketProtocolError(f"unexpected gateway ping response: {resp}")
 
+        return resp
+
+    async def reset(self, timeout: float = 15.0) -> Dict[str, Any]:
+        """Reset the Pico through the gateway and wait for verification."""
+        resp = await self._send_and_recv(
+            {"gateway": "reset"},
+            timeout=timeout,
+        )
+        if (
+            resp.get("ok") != 1
+            or resp.get("event") != "reset"
+            or resp.get("restarted") != 1
+        ):
+            raise WebSocketProtocolError(
+                f"unexpected gateway reset response: {resp}"
+            )
         return resp
 
     async def get(self) -> Dict[str, Any]:

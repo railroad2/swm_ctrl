@@ -195,6 +195,11 @@ class WebSocketClientSync:
         client = self._require_client()
         return self._run(client.gateway_ping())
 
+    def reset(self, timeout: float = 15.0) -> Dict[str, Any]:
+        """Reset the Pico through the gateway and wait for verification."""
+        client = self._require_client()
+        return self._run(client.reset(timeout=timeout))
+
     def get(self) -> Dict[str, Any]:
         """Get cached or fetched PINSTAT ALL from gateway."""
         client = self._require_client()

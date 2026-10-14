@@ -26,6 +26,9 @@ Supported commands
 ping
     Ping both the gateway and Pico.
 
+reset
+    Run mpremote reset on the gateway and verify that the Pico restarted.
+
 on <pin expressions...>
     Turn ON one or more channels.
 
@@ -311,6 +314,17 @@ def cmd_ping(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_reset(args: argparse.Namespace) -> int:
+    """Reset the Pico through the gateway and wait for it to restart."""
+    with WebSocketClientSync(
+        derived_control_uri(args),
+        timeout=args.timeout,
+    ) as client:
+        client.reset(timeout=args.wait_timeout)
+    print("RESET SUCCESS")
+    return 0
+
+
 def cmd_on(args: argparse.Namespace) -> int:
     """Handle on command."""
     with WebSocketClientSync(derived_control_uri(args), timeout=args.timeout) as client:
@@ -516,6 +530,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_ping = sub.add_parser("ping", help="ping gateway and Pico")
     p_ping.set_defaults(func=cmd_ping)
+
+    p_reset = sub.add_parser(
+        "reset",
+        help="run mpremote reset on the gateway and verify Pico restart",
+    )
+    p_reset.add_argument(
+        "--wait-timeout",
+        type=float,
+        default=15.0,
+        help="seconds to wait for reset and restart verification",
+    )
+    p_reset.set_defaults(func=cmd_reset)
 
     p_on = sub.add_parser("on", help="turn on pins")
     p_on.add_argument("pins", nargs="+", help="pin expressions")
