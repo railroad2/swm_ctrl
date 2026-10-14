@@ -70,6 +70,13 @@ class ResetPico:
         self.reopen_count += 1
 
 
+class HangingProcess(FakeProcess):
+    async def communicate(self):
+        if not self.killed:
+            await asyncio.Future()
+        return self.stdout, self.stderr
+
+
 class MpremoteResetTests(unittest.IsolatedAsyncioTestCase):
     async def test_runs_fixed_command_without_shell(self):
         process = FakeProcess(stdout=b"reset complete\n")
@@ -94,6 +101,18 @@ class MpremoteResetTests(unittest.IsolatedAsyncioTestCase):
         ):
             with self.assertRaisesRegex(RuntimeError, "exit code 2"):
                 await run_mpremote_reset("mpremote", timeout=2.0)
+
+    async def test_kills_timed_out_process(self):
+        process = HangingProcess(returncode=None)
+
+        with patch(
+            "asyncio.create_subprocess_exec",
+            AsyncMock(return_value=process),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "timed out"):
+                await run_mpremote_reset("mpremote", timeout=0.001)
+
+        self.assertTrue(process.killed)
 
 
 class ResetGatewayTests(unittest.IsolatedAsyncioTestCase):

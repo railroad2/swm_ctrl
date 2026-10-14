@@ -52,6 +52,14 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now ws-gateway
 ```
 
+The gateway invokes `mpremote reset` for remote Pico resets. Set
+`MPREMOTE_EXECUTABLE` to the absolute path reported by `command -v mpremote`
+when the systemd service cannot find it. For example:
+
+```ini
+Environment="MPREMOTE_EXECUTABLE=/home/lgad/.local/bin/mpremote"
+```
+
 View the gateway log with:
 
 ```bash
@@ -71,6 +79,16 @@ is `ws://127.0.0.1:8765`; use `--uri` when the gateway is on another host:
 ```bash
 python3 websocket_client/sw_control.py --help
 python3 websocket_client/sw_control.py --uri ws://swm:8765 ping
+```
+
+Reset the Pico by running `mpremote reset` on the gateway host. The command
+returns success only after the gateway verifies `PING` and `PINSTAT ALL` over
+UART again:
+
+```bash
+python3 websocket_client/sw_control.py --uri ws://swm:8765 reset
+python3 websocket_client/sw_control.py --uri ws://swm:8765 \
+    reset --wait-timeout 20
 ```
 
 The client accepts linear pin numbers from 0 to 255 and matrix labels from

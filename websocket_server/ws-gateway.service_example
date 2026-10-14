@@ -15,6 +15,8 @@ RestartSec=2
 # Environment tuning
 Environment="PYTHONUNBUFFERED=1"
 Environment="CONTROL_ALLOWED_NETWORKS=127.0.0.1/32,192.168.0.0/24"
+# Set this to the output of: command -v mpremote
+Environment="MPREMOTE_EXECUTABLE=/home/lgad/.local/bin/mpremote"
 
 # Journal logging
 StandardOutput=journal
